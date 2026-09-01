@@ -98,22 +98,32 @@ TEMPLATES = [
 WSGI_APPLICATION = "face_attendance.wsgi.application"
 
 # ------------------------------------------------------------------
-# Database — PostgreSQL (psycopg 3)
+# Database — PostgreSQL (psycopg 3) by default.
+# Set DB_ENGINE=sqlite to run locally without a PostgreSQL server
+# (used for automated tests / lightweight environments).
 # ------------------------------------------------------------------
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": env("DB_NAME", "face_attendance_db"),
-        "USER": env("DB_USER", "face_admin"),
-        "PASSWORD": env("DB_PASSWORD", "strong_password_here"),
-        "HOST": env("DB_HOST", "127.0.0.1"),
-        "PORT": env("DB_PORT", "5432"),
-        "CONN_MAX_AGE": 60,
-        "OPTIONS": {
-            "sslmode": "prefer",  # switch to "require" in production
-        },
+if env("DB_ENGINE", "postgresql").lower() == "sqlite":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": env("DB_NAME", str(BASE_DIR / "db.sqlite3")),
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": env("DB_NAME", "face_attendance_db"),
+            "USER": env("DB_USER", "face_admin"),
+            "PASSWORD": env("DB_PASSWORD", "strong_password_here"),
+            "HOST": env("DB_HOST", "127.0.0.1"),
+            "PORT": env("DB_PORT", "5432"),
+            "CONN_MAX_AGE": 60,
+            "OPTIONS": {
+                "sslmode": "prefer",  # switch to "require" in production
+            },
+        }
+    }
 
 # ------------------------------------------------------------------
 # Authentication (custom User model)
@@ -203,16 +213,23 @@ MAX_UPLOAD_SIZE_MB = 5
 # ------------------------------------------------------------------
 # Security (HTTPS-ready; relax in DEBUG only)
 # ------------------------------------------------------------------
+# API clients (Flutter/Postman) must NEVER receive a 301/302 redirect.
+# - APPEND_SLASH is disabled so Django never issues a slash-normalisation
+#   redirect (which, for POST, surfaces as a 301 in older Django and a
+#   500 RuntimeError in Django 5.x). All API routes already use trailing
+#   slashes, so nothing breaks.
+# - SSL redirection is opt-in via the SECURE_SSL_REDIRECT env flag so a
+#   misconfigured DEBUG/HTTPS setup can never silently redirect requests.
+APPEND_SLASH = False
+
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-if not DEBUG:
-    SECURE_SSL_REDIRECT = True
+SECURE_SSL_REDIRECT = env("SECURE_SSL_REDIRECT", "False").lower() in ("1", "true", "yes")
+if SECURE_SSL_REDIRECT:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
-else:
-    SECURE_SSL_REDIRECT = False
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = MAX_UPLOAD_SIZE_MB * 1024 * 1024

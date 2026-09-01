@@ -1,12 +1,12 @@
 import io
 import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.styles import Font, PatternFill, Alignment
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-from django.db.models import Count, Q
+from django.db.models import Count
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 
@@ -46,6 +46,25 @@ class DashboardService:
         class_analytics = list(
             Class.objects.annotate(student_count=Count("students")).values("id", "name", "student_count")
         )
+
+        # Class-wise attendance for today (present / marked / total students).
+        class_attendance = []
+        for cls in Class.objects.all():
+            class_students = cls.students.count()
+            class_records = AttendanceRecord.objects.filter(
+                session__class_obj=cls, session__date=today
+            )
+            class_present = class_records.filter(status=AttendanceRecord.Status.PRESENT).count()
+            class_attendance.append(
+                {
+                    "class_id": cls.id,
+                    "class_name": cls.name,
+                    "student_count": class_students,
+                    "present": class_present,
+                    "marked": class_records.count(),
+                }
+            )
+
         section_analytics = list(
             Section.objects.select_related("class_obj").annotate(student_count=Count("students")).values(
                 "id", "name", "class_obj__name", "student_count"
@@ -76,12 +95,14 @@ class DashboardService:
             "face_registered": face_registered,
             "face_pending": face_pending,
             "today_sessions": today_sessions.count(),
+            "today_attendance": total_marked_today,
             "today_marked": total_marked_today,
             "today_present": present_today,
             "today_absent": absent_today,
             "today_late": late_today,
             "attendance_rate": attendance_rate,
             "class_analytics": class_analytics,
+            "class_attendance": class_attendance,
             "section_analytics": section_analytics,
             "recent_activity": recent_list,
         }
@@ -117,8 +138,6 @@ class ReportExportService:
             cell.fill = header_fill
             cell.font = header_font
             cell.alignment = align_center
-
-        row_font = Font(name="Calibri", size=10)
 
         for rec in queryset:
             student_profile = getattr(rec.student, "student_profile", None)

@@ -15,13 +15,18 @@ class IsSuperAdmin(BasePermission):
 
 
 class IsSchoolAdmin(BasePermission):
+    """Allows SUPER_ADMIN and SCHOOL_ADMIN (plus Django superusers)."""
+
     message = "Only School Administrators can perform this action."
 
     def has_permission(self, request, view):
         return bool(
             request.user
             and request.user.is_authenticated
-            and (request.user.role in ["super_admin", "school_admin", "admin"] or request.user.is_superuser)
+            and (
+                request.user.role in ["super_admin", "school_admin"]
+                or request.user.is_superuser
+            )
         )
 
 
@@ -59,7 +64,10 @@ class IsAdminOrTeacher(BasePermission):
         return bool(
             request.user
             and request.user.is_authenticated
-            and (request.user.role in ["super_admin", "school_admin", "admin", "teacher"] or request.user.is_superuser)
+            and (
+                request.user.role in ["super_admin", "school_admin", "teacher"]
+                or request.user.is_superuser
+            )
         )
 
 
@@ -72,7 +80,7 @@ class IsSelfOrAdminOrTeacher(BasePermission):
         user = request.user
         if not (user and user.is_authenticated):
             return False
-        if user.role in ["super_admin", "school_admin", "admin"] or user.is_superuser:
+        if user.role in ["super_admin", "school_admin"] or user.is_superuser:
             return True
         if getattr(obj, "user_id", None) == user.id:
             return True

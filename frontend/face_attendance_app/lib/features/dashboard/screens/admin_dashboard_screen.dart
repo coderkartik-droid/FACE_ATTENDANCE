@@ -14,11 +14,13 @@ final dashboardSummaryProvider = FutureProvider.autoDispose<Map<String, dynamic>
       'total_students': 0,
       'total_teachers': 0,
       'total_classes': 0,
+      'today_attendance': 0,
       'today_present': 0,
       'today_absent': 0,
       'face_registered': 0,
       'face_pending': 0,
       'attendance_rate': 0.0,
+      'class_attendance': <dynamic>[],
     };
   }
 });
@@ -112,7 +114,7 @@ class AdminDashboardScreen extends ConsumerWidget {
                   _StatCard(title: 'Total Students', value: '${data['total_students'] ?? 0}', icon: Icons.groups, color: Colors.blue),
                   _StatCard(title: 'Total Teachers', value: '${data['total_teachers'] ?? 0}', icon: Icons.school, color: Colors.purple),
                   _StatCard(title: 'Total Classes', value: '${data['total_classes'] ?? 0}', icon: Icons.class_, color: Colors.orange),
-                  _StatCard(title: "Today's Rate", value: '${data['attendance_rate'] ?? 0.0}%', icon: Icons.check_circle, color: Colors.green),
+                  _StatCard(title: "Today's Attendance", value: '${data['today_attendance'] ?? 0}', icon: Icons.event_available, color: Colors.green),
                   _StatCard(title: 'Present Today', value: '${data['today_present'] ?? 0}', icon: Icons.how_to_reg, color: Colors.lightGreen),
                   _StatCard(title: 'Absent Today', value: '${data['today_absent'] ?? 0}', icon: Icons.person_off, color: Colors.redAccent),
                   _StatCard(title: 'Face Registered', value: '${data['face_registered'] ?? 0}', icon: Icons.face, color: Colors.teal),
@@ -120,6 +122,12 @@ class AdminDashboardScreen extends ConsumerWidget {
                 ],
               ),
             ),
+            const SizedBox(height: 28),
+
+            // Class-wise breakdown (student count + today's attendance)
+            Text('Class-wise Overview', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            _buildClassWiseBreakdown(data, theme),
             const SizedBox(height: 28),
 
             // Quick Actions Grid
@@ -169,6 +177,46 @@ class AdminDashboardScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+Widget _buildClassWiseBreakdown(Map<String, dynamic> data, ThemeData theme) {
+  final classes = data['class_attendance'] as List<dynamic>? ?? const [];
+  if (classes.isEmpty) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Row(
+          children: [
+            Icon(Icons.info_outline, color: theme.colorScheme.primary),
+            const SizedBox(width: 12),
+            const Expanded(child: Text('No classes created yet. Register a class to see class-wise statistics.')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  return Column(
+    children: [
+      for (final item in classes)
+        Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          child: ListTile(
+            leading: CircleAvatar(
+              backgroundColor: theme.colorScheme.primary,
+              child: const Icon(Icons.class_, color: Colors.white),
+            ),
+            title: Text(
+              item['class_name']?.toString() ?? 'Unknown Class',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            subtitle: Text(
+              'Students: ${item['student_count'] ?? 0}  •  Present today: ${item['present'] ?? 0}/${item['marked'] ?? 0}',
+            ),
+          ),
+        ),
+    ],
+  );
 }
 
 class _StatCard extends StatelessWidget {

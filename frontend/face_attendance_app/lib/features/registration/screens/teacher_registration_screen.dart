@@ -118,7 +118,7 @@ class _TeacherRegistrationScreenState extends ConsumerState<TeacherRegistrationS
                 controller: _passwordController,
                 obscureText: true,
                 decoration: const InputDecoration(labelText: 'Password', prefixIcon: Icon(Icons.lock)),
-                validator: (v) => v == null || v.length < 6 ? 'Minimum 6 chars' : null,
+                validator: (v) => v == null || v.length < 8 ? 'Minimum 8 chars' : null,
               ),
               const SizedBox(height: 16),
               TextFormField(

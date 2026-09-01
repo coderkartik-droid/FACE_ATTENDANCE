@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -59,19 +60,37 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Student registered successfully! Starting face enrollment…'),
+            content: Text('Registration Successful! Capturing face photos now…'),
             backgroundColor: Colors.green,
           ),
         );
 
-        // Camera opens ONLY here — after successful registration (Step 2).
-        context.push('/face-registration',
-            extra: {'userId': newStudentId, 'studentName': studentName});
+        // The camera opens ONLY here — after a successful registration.
+        context.pushReplacement(
+          '/face-registration',
+          extra: {'userId': newStudentId, 'studentName': studentName},
+        );
+      }
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      final message = (data is Map && data['message'] != null)
+          ? data['message'].toString()
+          : (e.message ?? 'Registration failed');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Registration failed: $message'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error registering student: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(
+            content: Text('Registration failed: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     } finally {
@@ -82,7 +101,7 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Step 1: Student Registration Form')),
+      appBar: AppBar(title: const Text('Student Registration Form')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Form(
@@ -95,7 +114,7 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
               ),
               const SizedBox(height: 4),
-              const Text('Record will remain incomplete until Face Registration is finished in Step 2.'),
+              const Text('Face photos are captured automatically right after registration.'),
               const SizedBox(height: 20),
 
               Row(
@@ -163,7 +182,7 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
                 controller: _passwordController,
                 obscureText: true,
                 decoration: const InputDecoration(labelText: 'Password *', prefixIcon: Icon(Icons.lock)),
-                validator: (v) => v == null || v.length < 6 ? 'Minimum 6 chars' : null,
+                validator: (v) => v == null || v.length < 8 ? 'Minimum 8 chars' : null,
               ),
               const SizedBox(height: 16),
 

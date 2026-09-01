@@ -1,6 +1,5 @@
 from rest_framework import serializers
 from apps.attendance.models import AttendanceSession, AttendanceRecord
-from apps.accounts.serializers import UserSerializer
 
 
 class AttendanceRecordSerializer(serializers.ModelSerializer):
@@ -47,6 +46,8 @@ class AttendanceSessionSerializer(serializers.ModelSerializer):
             "records",
             "created_at",
         )
+        # The teacher is always the authenticated user performing the request.
+        read_only_fields = ("teacher",)
 
 
 class MarkAttendanceRequestSerializer(serializers.Serializer):

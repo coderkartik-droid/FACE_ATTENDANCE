@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -53,11 +54,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (mounted) {
         context.go('/dashboard');
       }
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      final message = (data is Map && data['message'] != null)
+          ? data['message'].toString()
+          : (e.response?.statusCode == 401
+              ? 'Invalid username or password.'
+              : (e.message ?? 'Unable to reach server.'));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Login failed: Invalid credentials or server error ($e)'),
+            content: Text('Login failed: $e'),
             backgroundColor: Colors.redAccent,
           ),
         );

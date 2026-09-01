@@ -1,5 +1,4 @@
 from rest_framework import viewsets
-from rest_framework.permissions import IsAuthenticated
 
 from core.mixins import StandardResponseMixin
 from core.permissions import IsAdminOrTeacher, ReadOnly
