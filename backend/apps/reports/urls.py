@@ -2,9 +2,7 @@ from django.urls import path
 from apps.reports.views import DashboardView, ExcelExportView, PDFExportView
 
 urlpatterns = [
-    path("", DashboardView.as_view(), name="dashboard_main"),
-    path("dashboard/", DashboardView.as_view(), name="dashboard_alt"),
-    path("summary/", DashboardView.as_view(), name="dashboard_summary"),
+    path("dashboard/", DashboardView.as_view(), name="dashboard_main"),
     path("export/excel/", ExcelExportView.as_view(), name="export_excel"),
     path("export/pdf/", PDFExportView.as_view(), name="export_pdf"),
 ]

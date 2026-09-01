@@ -1,11 +1,11 @@
 from rest_framework import generics, status, viewsets
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.contrib.auth import get_user_model
 
 from core.mixins import StandardResponseMixin
-from core.permissions import IsAdmin, IsAdminOrTeacher, IsSelfOrAdminOrTeacher
+from core.permissions import IsAdmin, IsAdminOrTeacher, IsSchoolAdmin
 from apps.accounts.models import TeacherProfile, StudentProfile
 from apps.accounts.serializers import (
     RoleTokenObtainPairSerializer,
@@ -54,7 +54,7 @@ class MeView(generics.RetrieveUpdateAPIView):
 
 
 class RegisterTeacherView(generics.CreateAPIView):
-    permission_classes = [IsAdmin]
+    permission_classes = [IsSchoolAdmin]
     serializer_class = TeacherRegisterSerializer
 
     def create(self, request, *args, **kwargs):
@@ -72,7 +72,7 @@ class RegisterTeacherView(generics.CreateAPIView):
 
 
 class RegisterStudentView(generics.CreateAPIView):
-    permission_classes = [IsAdminOrTeacher]
+    permission_classes = [IsSchoolAdmin]
     serializer_class = StudentRegisterSerializer
 
     def create(self, request, *args, **kwargs):
@@ -112,7 +112,9 @@ class ChangePasswordView(generics.UpdateAPIView):
 class StudentViewSet(StandardResponseMixin, viewsets.ModelViewSet):
     permission_classes = [IsAdminOrTeacher]
     serializer_class = StudentProfileSerializer
-    queryset = StudentProfile.objects.select_related("user", "class_obj", "section_obj").all()
+    queryset = StudentProfile.objects.select_related("user", "class_obj", "section_obj").order_by(
+        "roll_number"
+    )
     filterset_fields = ["class_obj", "section_obj", "gender"]
     search_fields = ["user__first_name", "user__last_name", "user__username", "roll_number"]
 
@@ -120,6 +122,6 @@ class StudentViewSet(StandardResponseMixin, viewsets.ModelViewSet):
 class TeacherViewSet(StandardResponseMixin, viewsets.ModelViewSet):
     permission_classes = [IsAdmin]
     serializer_class = TeacherProfileSerializer
-    queryset = TeacherProfile.objects.select_related("user").all()
+    queryset = TeacherProfile.objects.select_related("user").order_by("employee_id")
     filterset_fields = ["department"]
     search_fields = ["user__first_name", "user__last_name", "user__username", "employee_id"]

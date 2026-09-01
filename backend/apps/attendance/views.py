@@ -5,10 +5,9 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
 from django.utils import timezone
-from django.db.models import Q
 
 from core.mixins import StandardResponseMixin
-from core.permissions import IsAdminOrTeacher, IsStudent
+from core.permissions import IsAdminOrTeacher
 from core.exceptions import BusinessValidationError
 from apps.attendance.models import AttendanceSession, AttendanceRecord
 from apps.attendance.serializers import (

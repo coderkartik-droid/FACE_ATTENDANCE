@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
 
 from core.mixins import StandardResponseMixin
-from core.permissions import IsAdminOrTeacher
+from core.permissions import IsAdminOrTeacher, IsSchoolAdmin
 from core.exceptions import BusinessValidationError
 from apps.faces.models import FaceEmbedding, FaceImage
 from apps.faces.serializers import (
@@ -21,7 +21,7 @@ User = get_user_model()
 
 
 class RegisterFaceView(generics.CreateAPIView):
-    permission_classes = [IsAdminOrTeacher]
+    permission_classes = [IsSchoolAdmin]
     serializer_class = FaceRegisterRequestSerializer
 
     def create(self, request, *args, **kwargs):
@@ -36,6 +36,12 @@ class RegisterFaceView(generics.CreateAPIView):
         except User.DoesNotExist:
             logger.warning(f"Face registration failed: User ID {user_id} not found.")
             raise BusinessValidationError("Target user not found.")
+
+        # Face enrollment is only meaningful for students.
+        if not target_user.is_student():
+            raise BusinessValidationError(
+                "Face enrollment can only be performed for a student."
+            )
 
         if replace_existing:
             deactivated_count = FaceEmbedding.objects.filter(

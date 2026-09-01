@@ -22,7 +22,9 @@ class FaceRegisterRequestSerializer(serializers.Serializer):
     images = serializers.ListField(
         child=serializers.ImageField(),
         allow_empty=False,
-        help_text="Provide up to 5 face sample images",
+        min_length=5,
+        max_length=5,
+        help_text="Exactly 5 face sample images are required",
     )
     replace_existing = serializers.BooleanField(
         default=True,

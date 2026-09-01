@@ -1,14 +1,20 @@
-
+import 'package:camera/camera.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
+
 import '../../../core/network/api_client.dart';
 
-/// Step 2: Automatic face enrollment.
-/// Opens ONLY after successful student registration. Never before.
-/// Captures exactly 5 face photos, uploads them for embedding generation.
+/// Automatic face enrollment — runs ONLY after a student has been registered.
+///
+/// Flow (no manual "enroll" button):
+///   1. A SMALL in-app camera window opens.
+///   2. Exactly 5 face images are captured automatically.
+///   3. Progress is shown as "Image 1/5" ... "Image 5/5".
+///   4. Images are uploaded; the backend generates the face encoding.
+///   5. The camera closes and "Registration Completed Successfully" is shown.
 class FaceRegistrationScreen extends ConsumerStatefulWidget {
   final int targetUserId;
   final String studentName;
@@ -20,44 +26,105 @@ class FaceRegistrationScreen extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<FaceRegistrationScreen> createState() => _FaceRegistrationScreenState();
+  ConsumerState<FaceRegistrationScreen> createState() =>
+      _FaceRegistrationScreenState();
 }
 
 class _FaceRegistrationScreenState extends ConsumerState<FaceRegistrationScreen> {
   static const int requiredPhotos = 5;
-  final List<XFile> _capturedImages = [];
-  bool _isUploading = false;
-  String? _error;
-  final ImagePicker _picker = ImagePicker();
 
-  Future<void> _captureNext() async {
-    if (_capturedImages.length >= requiredPhotos || _isUploading) return;
-    setState(() => _error = null);
+  CameraController? _controller;
+  bool _cameraReady = false;
+  bool _capturing = false;
+  bool _uploading = false;
+  bool _completed = false;
+  int _capturedCount = 0;
+  final List<XFile> _capturedImages = [];
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
     try {
-      final XFile? photo = await _picker.pickImage(
-        source: ImageSource.camera,
-        preferredCameraDevice: CameraDevice.front,
-        maxWidth: 1024,
-        imageQuality: 85,
-      );
-      if (photo == null) {
-        if (!mounted) return;
-        setState(() => _error = 'Capture cancelled. Please try again.');
+      final status = await Permission.camera.request();
+      if (!status.isGranted) {
+        if (mounted) {
+          setState(() => _error = 'Camera permission is required for face enrollment.');
+        }
         return;
       }
-      setState(() => _capturedImages.add(photo));
-      if (_capturedImages.length < requiredPhotos && mounted) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _captureNext());
+
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        if (mounted) setState(() => _error = 'No camera available on this device.');
+        return;
+      }
+
+      final front = cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.front,
+        orElse: () => cameras.first,
+      );
+
+      final controller = CameraController(
+        front,
+        ResolutionPreset.medium,
+        enableAudio: false,
+      );
+      await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      _controller = controller;
+      setState(() => _cameraReady = true);
+
+      // Start the automatic 5-photo capture sequence.
+      _startAutoCapture();
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Failed to open camera: $e');
+    }
+  }
+
+  Future<void> _startAutoCapture() async {
+    if (_capturing || _capturedImages.length >= requiredPhotos) return;
+    setState(() {
+      _capturing = true;
+      _error = null;
+    });
+
+    try {
+      for (var i = _capturedImages.length; i < requiredPhotos; i++) {
+        if (!mounted || _controller == null || !_controller!.value.isInitialized) {
+          break;
+        }
+        final XFile photo = await _controller!.takePicture();
+        _capturedImages.add(photo);
+        if (mounted) {
+          setState(() => _capturedCount = _capturedImages.length);
+        }
+        // Small pause between shots so the subject can adjust.
+        if (_capturedImages.length < requiredPhotos) {
+          await Future<void>.delayed(const Duration(milliseconds: 1200));
+        }
       }
     } catch (e) {
-      if (mounted) setState(() => _error = 'Camera error: $e');
+      if (mounted) setState(() => _error = 'Capture failed: $e');
+    } finally {
+      if (mounted) setState(() => _capturing = false);
+    }
+
+    if (_capturedImages.length >= requiredPhotos) {
+      await _submitFaceRegistration();
     }
   }
 
   Future<void> _submitFaceRegistration() async {
-    if (_capturedImages.length != requiredPhotos) return;
-
-    setState(() => _isUploading = true);
+    if (_uploading || _completed) return;
+    setState(() => _uploading = true);
 
     try {
       final apiClient = ApiClient();
@@ -72,18 +139,25 @@ class _FaceRegistrationScreenState extends ConsumerState<FaceRegistrationScreen>
           ),
         );
       }
+
       final response = await apiClient.dio.post('faces/register/', data: formData);
-      final registered = response.data['data']?['registered_count'] ?? requiredPhotos;
+      final registered =
+          response.data?['data']?['registered_count'] ?? requiredPhotos;
+
+      // Close the camera now that enrollment is complete.
+      await _disposeCamera();
 
       if (mounted) {
-        await showDialog(
+        setState(() => _completed = true);
+        await showDialog<void>(
           context: context,
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
             icon: const Icon(Icons.check_circle, color: Colors.green, size: 54),
-            title: const Text('Face Enrollment Completed Successfully'),
+            title: const Text('Registration Completed Successfully'),
             content: Text(
-              '$registered face embedding(s) generated and saved for ${widget.studentName}. The student is now marked as Face Registered.',
+              '$registered face image(s) captured and the face encoding was '
+              'generated for ${widget.studentName}.',
             ),
             actions: [
               TextButton(
@@ -98,26 +172,43 @@ class _FaceRegistrationScreenState extends ConsumerState<FaceRegistrationScreen>
         );
       }
     } on DioException catch (e) {
-      final msg = e.response?.data?['message'] ?? e.message ?? 'Upload failed';
+      final msg = e.response?.data is Map
+          ? (e.response!.data['message'] ?? e.message)
+          : e.message;
       if (mounted) setState(() => _error = 'Enrollment failed: $msg');
     } catch (e) {
       if (mounted) setState(() => _error = 'Enrollment failed: $e');
     } finally {
-      if (mounted) setState(() => _isUploading = false);
+      if (mounted) setState(() => _uploading = false);
     }
+  }
+
+  Future<void> _disposeCamera() async {
+    final controller = _controller;
+    _controller = null;
+    if (controller != null) {
+      try {
+        await controller.dispose();
+      } catch (_) {}
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposeCamera();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final count = _capturedImages.length;
-    final complete = count >= requiredPhotos;
+    final count = _capturedCount;
 
     return PopScope(
       canPop: false,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Step 2: Face Enrollment'),
+          title: const Text('Face Enrollment'),
           automaticallyImplyLeading: false,
         ),
         body: Center(
@@ -127,12 +218,6 @@ class _FaceRegistrationScreenState extends ConsumerState<FaceRegistrationScreen>
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(
-                  complete ? Icons.face_retouching_natural : Icons.face,
-                  size: 72,
-                  color: complete ? Colors.green : theme.primaryColor,
-                ),
-                const SizedBox(height: 12),
                 Text(
                   'Face Enrollment for ${widget.studentName}',
                   textAlign: TextAlign.center,
@@ -140,22 +225,52 @@ class _FaceRegistrationScreenState extends ConsumerState<FaceRegistrationScreen>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  complete
-                      ? 'All photos captured. Upload to generate face embeddings.'
-                      : 'Photo ${count + 1}/$requiredPhotos — position the face inside the oval and capture.',
+                  _completed
+                      ? 'Registration Completed Successfully'
+                      : 'Please keep your face inside the frame. Photos are captured automatically.',
                   textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyLarge,
+                  style: theme.textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 20),
 
-                // Progress indicator: Photo 1/5 .. Photo 5/5
+                // SMALL in-app camera window.
+                Center(
+                  child: Container(
+                    width: 240,
+                    height: 300,
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: theme.primaryColor, width: 3),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: _cameraReady && _controller != null
+                        ? CameraPreview(_controller!)
+                        : const Center(
+                            child: CircularProgressIndicator(color: Colors.white),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Progress: Image 1/5 .. Image 5/5
+                Text(
+                  'Image $count/$requiredPhotos',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: theme.primaryColor,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: List.generate(requiredPhotos, (i) {
                     final done = i < count;
-                    return Container(
-                      width: 34,
-                      height: 34,
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      width: 32,
+                      height: 32,
                       margin: const EdgeInsets.symmetric(horizontal: 5),
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
@@ -168,18 +283,15 @@ class _FaceRegistrationScreenState extends ConsumerState<FaceRegistrationScreen>
                       child: Center(
                         child: done
                             ? const Icon(Icons.check, color: Colors.white, size: 20)
-                            : Text('${i + 1}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                            : Text(
+                                '${i + 1}',
+                                style: const TextStyle(fontWeight: FontWeight.bold),
+                              ),
                       ),
                     );
                   }),
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  'Photo $count/$requiredPhotos captured',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: theme.primaryColor, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
 
                 if (_error != null)
                   Padding(
@@ -191,42 +303,35 @@ class _FaceRegistrationScreenState extends ConsumerState<FaceRegistrationScreen>
                     ),
                   ),
 
-                if (_isUploading)
+                if (_uploading)
                   const Column(
                     children: [
                       CircularProgressIndicator(),
                       SizedBox(height: 12),
-                      Text('Generating face embeddings and saving…'),
+                      Text('Generating face encoding and saving…'),
                     ],
                   )
-                else ...[
+                else if (!_completed && _capturing)
+                  const Text(
+                    'Capturing…',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  )
+                else if (!_completed && _cameraReady)
                   ElevatedButton.icon(
-                    onPressed: complete ? _submitFaceRegistration : _captureNext,
-                    icon: Icon(complete ? Icons.cloud_upload : Icons.camera_alt),
-                    label: Text(
-                      complete
-                          ? 'Save Face Data & Complete Enrollment'
-                          : 'Capture Photo ${count + 1}/$requiredPhotos',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
+                    onPressed: _startAutoCapture,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Retry Capture'),
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      backgroundColor: complete ? Colors.green : theme.primaryColor,
-                      foregroundColor: Colors.white,
                     ),
+                  )
+                else if (!_completed && !_cameraReady && _error != null)
+                  OutlinedButton.icon(
+                    onPressed: () => context.go('/dashboard'),
+                    icon: const Icon(Icons.arrow_back),
+                    label: const Text('Back to Dashboard'),
                   ),
-                  if (count > 0 && !complete)
-                    TextButton(
-                      onPressed: () => setState(() => _capturedImages.removeLast()),
-                      child: const Text('Retake last photo'),
-                    ),
-                ],
-                const SizedBox(height: 12),
-                const Text(
-                  'The camera is only used for face enrollment after successful registration.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: Colors.black54),
-                ),
               ],
             ),
           ),

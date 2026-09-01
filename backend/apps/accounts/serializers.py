@@ -82,6 +82,8 @@ class TeacherRegisterSerializer(serializers.ModelSerializer):
             "first_name",
             "last_name",
             "phone",
+            "employee_id",
+            "department",
         )
 
     def validate_username(self, value):
