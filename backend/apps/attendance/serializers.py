@@ -7,15 +7,21 @@ class AttendanceRecordSerializer(serializers.ModelSerializer):
     roll_number = serializers.CharField(
         source="student.student_profile.roll_number", read_only=True, default=""
     )
+    class_name = serializers.CharField(source="session.class_obj.name", read_only=True, default="")
+    section_name = serializers.CharField(source="session.section_obj.name", read_only=True, default="")
+    session_name = serializers.CharField(source="session.session_name", read_only=True, default="")
 
     class Meta:
         model = AttendanceRecord
         fields = (
             "id",
             "session",
+            "session_name",
             "student",
             "student_name",
             "roll_number",
+            "class_name",
+            "section_name",
             "status",
             "verification_method",
             "confidence_score",
@@ -51,7 +57,7 @@ class AttendanceSessionSerializer(serializers.ModelSerializer):
 
 
 class MarkAttendanceRequestSerializer(serializers.Serializer):
-    session_id = serializers.IntegerField(required=True)
+    session_id = serializers.IntegerField(required=False, allow_null=True)
     image = serializers.ImageField(required=False, help_text="Camera frame for face recognition")
     student_id = serializers.IntegerField(required=False, help_text="For manual attendance override")
     status = serializers.ChoiceField(

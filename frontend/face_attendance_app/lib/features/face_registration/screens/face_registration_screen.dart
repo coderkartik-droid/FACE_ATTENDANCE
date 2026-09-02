@@ -127,7 +127,7 @@ class _FaceRegistrationScreenState extends ConsumerState<FaceRegistrationScreen>
     setState(() => _uploading = true);
 
     try {
-      final apiClient = ApiClient();
+      final apiClient = await ApiClient.fromPrefs();
       final formData = FormData();
       formData.fields.add(MapEntry('user_id', widget.targetUserId.toString()));
       formData.fields.add(MapEntry('replace_existing', 'true'));
@@ -154,7 +154,7 @@ class _FaceRegistrationScreenState extends ConsumerState<FaceRegistrationScreen>
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
             icon: const Icon(Icons.check_circle, color: Colors.green, size: 54),
-            title: const Text('Registration Completed Successfully'),
+            title: const Text('Face Registration Completed Successfully'),
             content: Text(
               '$registered face image(s) captured and the face encoding was '
               'generated for ${widget.studentName}.',
@@ -211,132 +211,178 @@ class _FaceRegistrationScreenState extends ConsumerState<FaceRegistrationScreen>
           title: const Text('Face Enrollment'),
           automaticallyImplyLeading: false,
         ),
-        body: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Face Enrollment for ${widget.studentName}',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _completed
-                      ? 'Registration Completed Successfully'
-                      : 'Please keep your face inside the frame. Photos are captured automatically.',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 20),
+        body: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 8),
+              Text(
+                'Face Enrollment for ${widget.studentName}',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _completed
+                    ? 'Registration Completed Successfully'
+                    : 'Keep your face inside the oval guide. Photos are captured automatically.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 8),
 
-                // SMALL in-app camera window.
-                Center(
-                  child: Container(
-                    width: 240,
-                    height: 300,
-                    decoration: BoxDecoration(
-                      color: Colors.black,
+              // LARGE in-app camera window (~80% of the screen) with an
+              // oval face guide. No capture button — photos are taken
+              // automatically.
+              Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 4, horizontal: 12),
+                    child: ClipRRect(
                       borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: theme.primaryColor, width: 3),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: _cameraReady && _controller != null
-                        ? CameraPreview(_controller!)
-                        : const Center(
-                            child: CircularProgressIndicator(color: Colors.white),
-                          ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // Progress: Image 1/5 .. Image 5/5
-                Text(
-                  'Image $count/$requiredPhotos',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: theme.primaryColor,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(requiredPhotos, (i) {
-                    final done = i < count;
-                    return AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: 32,
-                      height: 32,
-                      margin: const EdgeInsets.symmetric(horizontal: 5),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: done ? Colors.green : Colors.black12,
-                        border: Border.all(
-                          color: done ? Colors.green : theme.primaryColor,
-                          width: 2,
-                        ),
-                      ),
-                      child: Center(
-                        child: done
-                            ? const Icon(Icons.check, color: Colors.white, size: 20)
-                            : Text(
-                                '${i + 1}',
-                                style: const TextStyle(fontWeight: FontWeight.bold),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (_cameraReady && _controller != null)
+                            FittedBox(
+                              fit: BoxFit.cover,
+                              child: SizedBox(
+                                width:
+                                    _controller!.value.previewSize!.height,
+                                height:
+                                    _controller!.value.previewSize!.width,
+                                child: CameraPreview(_controller!),
                               ),
+                            )
+                          else
+                            Container(
+                              color: Colors.black,
+                              child: const Center(
+                                child: CircularProgressIndicator(
+                                    color: Colors.white),
+                              ),
+                            ),
+                          // Oval face guide.
+                          CustomPaint(
+                            painter: _OvalGuidePainter(
+                              color: _capturing
+                                  ? Colors.greenAccent
+                                  : Colors.white,
+                            ),
+                          ),
+                          if (_uploading)
+                            Container(
+                              color: Colors.black54,
+                              child: const Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    CircularProgressIndicator(
+                                        color: Colors.white),
+                                    SizedBox(height: 12),
+                                    Text(
+                                      'Generating face encoding and saving…',
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
-                    );
-                  }),
-                ),
-                const SizedBox(height: 20),
-
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: Text(
-                      _error!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.redAccent),
                     ),
                   ),
+                ),
 
-                if (_uploading)
-                  const Column(
-                    children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 12),
-                      Text('Generating face encoding and saving…'),
-                    ],
-                  )
-                else if (!_completed && _capturing)
-                  const Text(
+              // Progress: Image 1/5 .. Image 5/5
+              Text(
+                'Image $count/$requiredPhotos',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: theme.primaryColor,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(requiredPhotos, (i) {
+                  final done = i < count;
+                  return AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: 32,
+                    height: 32,
+                    margin: const EdgeInsets.symmetric(horizontal: 5),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: done ? Colors.green : Colors.black12,
+                      border: Border.all(
+                        color: done ? Colors.green : theme.primaryColor,
+                        width: 2,
+                      ),
+                    ),
+                    child: Center(
+                      child: done
+                          ? const Icon(Icons.check, color: Colors.white, size: 20)
+                          : Text(
+                              '${i + 1}',
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                    ),
+                  );
+                }),
+              ),
+              const SizedBox(height: 16),
+
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    _error!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.redAccent),
+                  ),
+                ),
+
+              if (!_completed && _capturing)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: Text(
                     'Capturing…',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontWeight: FontWeight.w600),
-                  )
-                else if (!_completed && _cameraReady)
-                  ElevatedButton.icon(
-                    onPressed: _startAutoCapture,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Retry Capture'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                  )
-                else if (!_completed && !_cameraReady && _error != null)
-                  OutlinedButton.icon(
-                    onPressed: () => context.go('/dashboard'),
-                    icon: const Icon(Icons.arrow_back),
-                    label: const Text('Back to Dashboard'),
                   ),
-              ],
-            ),
+                ),
+            ],
           ),
         ),
       ),
     );
   }
+}
+
+class _OvalGuidePainter extends CustomPainter {
+  final Color color;
+  _OvalGuidePainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0;
+
+    final rect = Rect.fromCenter(
+      center: Offset(size.width / 2, size.height / 2),
+      width: size.width * 0.55,
+      height: size.height * 0.7,
+    );
+    canvas.drawOval(rect, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _OvalGuidePainter oldDelegate) =>
+      oldDelegate.color != color;
 }

@@ -81,6 +81,10 @@ class TeacherProfile(models.Model):
     )
     department = models.CharField(max_length=100)
     qualification = models.CharField(max_length=100, blank=True)
+    is_registration_complete = models.BooleanField(
+        default=False,
+        help_text="True only after teacher face embeddings are successfully captured",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -100,6 +104,10 @@ class StudentProfile(models.Model):
     )
     roll_number = models.CharField(
         max_length=20, unique=True, validators=[validate_roll_number]
+    )
+    admission_number = models.CharField(
+        max_length=20, unique=True, blank=True, null=True,
+        help_text="School admission number for the student",
     )
     father_name = models.CharField(max_length=100, blank=True)
     mother_name = models.CharField(max_length=100, blank=True)

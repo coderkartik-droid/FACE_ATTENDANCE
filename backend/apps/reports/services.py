@@ -6,7 +6,7 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 
@@ -47,21 +47,29 @@ class DashboardService:
             Class.objects.annotate(student_count=Count("students")).values("id", "name", "student_count")
         )
 
-        # Class-wise attendance for today (present / marked / total students).
+        # Class-wise attendance for today (single set of aggregate queries
+        # instead of one query per class).
         class_attendance = []
-        for cls in Class.objects.all():
-            class_students = cls.students.count()
-            class_records = AttendanceRecord.objects.filter(
-                session__class_obj=cls, session__date=today
+        today_stats = (
+            AttendanceRecord.objects.filter(session__date=today)
+            .values("session__class_obj_id", "session__class_obj__name")
+            .annotate(
+                marked=Count("id"),
+                present=Count("id", filter=Q(status=AttendanceRecord.Status.PRESENT)),
             )
-            class_present = class_records.filter(status=AttendanceRecord.Status.PRESENT).count()
+        )
+        stats_by_class = {
+            row["session__class_obj_id"]: row for row in today_stats
+        }
+        for cls in Class.objects.annotate(student_count=Count("students")):
+            row = stats_by_class.get(cls.id)
             class_attendance.append(
                 {
                     "class_id": cls.id,
                     "class_name": cls.name,
-                    "student_count": class_students,
-                    "present": class_present,
-                    "marked": class_records.count(),
+                    "student_count": cls.student_count,
+                    "present": row["present"] if row else 0,
+                    "marked": row["marked"] if row else 0,
                 }
             )
 

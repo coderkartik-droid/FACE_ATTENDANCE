@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -6,7 +7,7 @@ import '../../auth/providers/auth_provider.dart';
 
 final dashboardSummaryProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   try {
-    final apiClient = ApiClient();
+    final apiClient = await ApiClient.fromPrefs();
     final response = await apiClient.dio.get('reports/dashboard/');
     return response.data['data'] ?? {};
   } catch (e) {
@@ -25,6 +26,33 @@ final dashboardSummaryProvider = FutureProvider.autoDispose<Map<String, dynamic>
   }
 });
 
+// Auto-refresh controller for dashboard
+class DashboardAutoRefresh extends StateNotifier<void> {
+  DashboardAutoRefresh(this.ref) : super(null) {
+    _startAutoRefresh();
+  }
+
+  Timer? _timer;
+  final Ref ref;
+
+  void _startAutoRefresh() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) {
+      ref.invalidate(dashboardSummaryProvider);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+}
+
+final dashboardAutoRefreshProvider = StateNotifierProvider<DashboardAutoRefresh, void>((ref) {
+  return DashboardAutoRefresh(ref);
+});
+
 class AdminDashboardScreen extends ConsumerWidget {
   const AdminDashboardScreen({super.key});
 
@@ -34,6 +62,9 @@ class AdminDashboardScreen extends ConsumerWidget {
     final userState = ref.watch(authProvider);
     final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
     final dashboardAsync = ref.watch(dashboardSummaryProvider);
+    
+    // Enable auto-refresh when dashboard is shown
+    ref.watch(dashboardAutoRefreshProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -98,36 +129,43 @@ class AdminDashboardScreen extends ConsumerWidget {
             const SizedBox(height: 24),
 
             // Stat Cards Grid
+
+
             Text('Live System Overview', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
 
             dashboardAsync.when(
               loading: () => const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator())),
               error: (err, stack) => const Text('Failed to load live metrics from database.'),
-              data: (data) => GridView.count(
-                crossAxisCount: MediaQuery.of(context).size.width > 600 ? 3 : 2,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
+              data: (data) => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _StatCard(title: 'Total Students', value: '${data['total_students'] ?? 0}', icon: Icons.groups, color: Colors.blue),
-                  _StatCard(title: 'Total Teachers', value: '${data['total_teachers'] ?? 0}', icon: Icons.school, color: Colors.purple),
-                  _StatCard(title: 'Total Classes', value: '${data['total_classes'] ?? 0}', icon: Icons.class_, color: Colors.orange),
-                  _StatCard(title: "Today's Attendance", value: '${data['today_attendance'] ?? 0}', icon: Icons.event_available, color: Colors.green),
-                  _StatCard(title: 'Present Today', value: '${data['today_present'] ?? 0}', icon: Icons.how_to_reg, color: Colors.lightGreen),
-                  _StatCard(title: 'Absent Today', value: '${data['today_absent'] ?? 0}', icon: Icons.person_off, color: Colors.redAccent),
-                  _StatCard(title: 'Face Registered', value: '${data['face_registered'] ?? 0}', icon: Icons.face, color: Colors.teal),
-                  _StatCard(title: 'Face Pending', value: '${data['face_pending'] ?? 0}', icon: Icons.pending_actions, color: Colors.deepOrange),
+                  GridView.count(
+                    crossAxisCount: MediaQuery.of(context).size.width > 600 ? 3 : 2,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    children: [
+                      _StatCard(title: 'Total Students', value: '${data['total_students'] ?? 0}', icon: Icons.groups, color: Colors.blue),
+                      _StatCard(title: 'Total Teachers', value: '${data['total_teachers'] ?? 0}', icon: Icons.school, color: Colors.purple),
+                      _StatCard(title: 'Total Classes', value: '${data['total_classes'] ?? 0}', icon: Icons.class_, color: Colors.orange),
+                      _StatCard(title: "Today's Attendance", value: '${data['today_attendance'] ?? 0}', icon: Icons.event_available, color: Colors.green),
+                      _StatCard(title: 'Present Today', value: '${data['today_present'] ?? 0}', icon: Icons.how_to_reg, color: Colors.lightGreen),
+                      _StatCard(title: 'Absent Today', value: '${data['today_absent'] ?? 0}', icon: Icons.person_off, color: Colors.redAccent),
+                      _StatCard(title: 'Face Registered', value: '${data['face_registered'] ?? 0}', icon: Icons.face, color: Colors.teal),
+                      _StatCard(title: 'Face Pending', value: '${data['face_pending'] ?? 0}', icon: Icons.pending_actions, color: Colors.deepOrange),
+                    ],
+                  ),
+                  const SizedBox(height: 28),
+
+                  // Class-wise breakdown (student count + today's attendance)
+                  Text('Class-wise Overview', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  _buildClassWiseBreakdown(data, theme),
                 ],
               ),
             ),
-            const SizedBox(height: 28),
-
-            // Class-wise breakdown (student count + today's attendance)
-            Text('Class-wise Overview', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            _buildClassWiseBreakdown(data, theme),
             const SizedBox(height: 28),
 
             // Quick Actions Grid
@@ -151,6 +189,24 @@ class AdminDashboardScreen extends ConsumerWidget {
                   icon: Icons.person_add,
                   color: Colors.teal,
                   onTap: () => context.push('/register-student'),
+                ),
+                _ActionCard(
+                  title: 'Classes',
+                  icon: Icons.class_,
+                  color: Colors.orange,
+                  onTap: () => context.push('/classes'),
+                ),
+                _ActionCard(
+                  title: 'Teachers',
+                  icon: Icons.school,
+                  color: Colors.purple,
+                  onTap: () => context.push('/teachers'),
+                ),
+                _ActionCard(
+                  title: 'Students',
+                  icon: Icons.groups,
+                  color: Colors.blue,
+                  onTap: () => context.push('/students'),
                 ),
                 _ActionCard(
                   title: 'Live Attendance',

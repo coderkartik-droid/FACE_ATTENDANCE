@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 
 from core.mixins import StandardResponseMixin
 from core.permissions import IsAdminOrTeacher, IsSchoolAdmin
-from core.exceptions import BusinessValidationError
+from core.exceptions import BusinessValidationError, FaceNotDetectedError
 from apps.faces.models import FaceEmbedding, FaceImage
 from apps.faces.serializers import (
     FaceEmbeddingSerializer,
@@ -37,10 +37,10 @@ class RegisterFaceView(generics.CreateAPIView):
             logger.warning(f"Face registration failed: User ID {user_id} not found.")
             raise BusinessValidationError("Target user not found.")
 
-        # Face enrollment is only meaningful for students.
-        if not target_user.is_student():
+        # Face enrollment is supported for both students and teachers.
+        if not (target_user.is_student() or target_user.is_teacher()):
             raise BusinessValidationError(
-                "Face enrollment can only be performed for a student."
+                "Face enrollment can only be performed for a student or teacher."
             )
 
         if replace_existing:
@@ -69,6 +69,9 @@ class RegisterFaceView(generics.CreateAPIView):
         if hasattr(target_user, "student_profile"):
             target_user.student_profile.is_registration_complete = True
             target_user.student_profile.save()
+        elif hasattr(target_user, "teacher_profile"):
+            target_user.teacher_profile.is_registration_complete = True
+            target_user.teacher_profile.save()
 
         logger.info(
             f"Successfully registered {len(created_embeddings)} face embeddings for user {target_user.username} (ID: {target_user.id}). Registration Complete."
@@ -98,6 +101,8 @@ class VerifyFaceView(generics.CreateAPIView):
 
         image_file = serializer.validated_data["image"]
         face_results = FaceRecognitionService.extract_face_embeddings(image_file)
+        if not face_results:
+            raise FaceNotDetectedError()
         best_face = max(face_results, key=lambda x: x["score"])
 
         matched_user, confidence = FaceRecognitionService.match_face(

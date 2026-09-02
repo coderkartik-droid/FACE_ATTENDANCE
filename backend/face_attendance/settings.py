@@ -31,7 +31,7 @@ SECRET_KEY = env(
     "django-insecure-fallback-key-change-me-in-production",
 )
 DEBUG = env("DEBUG", "True").lower() in ("1", "true", "yes")
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = [h.strip() for h in env("ALLOWED_HOSTS", "*").split(",") if h.strip()]
 
 # ------------------------------------------------------------------
 # Applications
@@ -184,7 +184,14 @@ SIMPLE_JWT = {
 # ------------------------------------------------------------------
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:8000", "http://192.168.1.7:8000"]
+CSRF_TRUSTED_ORIGINS = [
+    o.strip()
+    for o in env(
+        "CSRF_TRUSTED_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:8000,http://192.168.1.5:8000",
+    ).split(",")
+    if o.strip()
+]
 
 # ------------------------------------------------------------------
 # i18n / tz
@@ -239,9 +246,10 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # ------------------------------------------------------------------
 # Face recognition
 # ------------------------------------------------------------------
-FACE_MATCH_THRESHOLD = float(env("FACE_MATCH_THRESHOLD", "0.45"))
+FACE_MATCH_THRESHOLD = float(env("FACE_MATCH_THRESHOLD", "0.42"))
 FACE_IMAGES_PER_REGISTRATION = 5
-INSIGHTFACE_MODEL_PACK = "buffalo_l"
+FACE_MODELS_DIR = Path(BASE_DIR) / "face_models"
+# INSIGHTFACE_MODEL_PACK is no longer used (raw ONNX pipeline replaces it).
 
 # ------------------------------------------------------------------
 # Logging

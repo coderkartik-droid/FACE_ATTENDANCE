@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -25,7 +27,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final apiClient = ApiClient();
+      final apiClient = await ApiClient.fromPrefs();
+
+      developer.log(
+        'Login attempt → ${apiClient.baseUrl}auth/login/',
+        name: 'LOGIN',
+      );
+
       final response = await apiClient.dio.post(
         'auth/login/',
         data: {
@@ -34,10 +42,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         },
       );
 
+      developer.log('Login success: ${response.statusCode}', name: 'LOGIN');
+
       final data = response.data;
       final access = data['access'];
       final refresh = data['refresh'];
-      final role = data['role'] ?? 'student'; // Automatically fetched from database
+      final role = data['role'] ?? 'student';
       final username = data['username'] ?? _usernameController.text.trim();
       final fullName = data['full_name'] ?? username;
       final userId = data['user_id'] ?? 0;
@@ -55,21 +65,43 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         context.go('/dashboard');
       }
     } on DioException catch (e) {
-      final data = e.response?.data;
-      final message = (data is Map && data['message'] != null)
-          ? data['message'].toString()
-          : (e.response?.statusCode == 401
-              ? 'Invalid username or password.'
-              : (e.message ?? 'Unable to reach server.'));
+      final uri = e.requestOptions.uri;
+      final type = e.type.name;
+
+      String message;
+      if (e.response?.data is Map && e.response!.data['message'] != null) {
+        message = e.response!.data['message'].toString();
+      } else if (e.response?.statusCode == 401) {
+        message = 'Invalid username or password.';
+      } else if (e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.connectionTimeout) {
+        message = 'Cannot reach server at $uri\n'
+            'Type: $type\n'
+            'Ensure Django is running on 0.0.0.0:8000 '
+            'and the tablet is on the same Wi-Fi network.';
+      } else {
+        message = e.message ?? 'Unknown Dio error ($type) for $uri';
+      }
+
+      developer.log(
+        'Login FAILED [$type]: $message',
+        name: 'LOGIN',
+        error: e,
+        stackTrace: e.stackTrace,
+      );
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(message),
             backgroundColor: Colors.redAccent,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
+      developer.log('Login EXCEPTION', name: 'LOGIN', error: e, stackTrace: st);
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

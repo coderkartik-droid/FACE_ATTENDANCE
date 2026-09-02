@@ -1,5 +1,7 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../../core/network/api_client.dart';
 
 class TeacherRegistrationScreen extends ConsumerStatefulWidget {
@@ -18,6 +20,7 @@ class _TeacherRegistrationScreenState extends ConsumerState<TeacherRegistrationS
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _departmentController = TextEditingController();
+  final _qualificationController = TextEditingController();
   final _phoneController = TextEditingController();
   bool _isLoading = false;
 
@@ -26,8 +29,8 @@ class _TeacherRegistrationScreenState extends ConsumerState<TeacherRegistrationS
     setState(() => _isLoading = true);
 
     try {
-      final apiClient = ApiClient();
-      await apiClient.dio.post(
+      final apiClient = await ApiClient.fromPrefs();
+      final response = await apiClient.dio.post(
         'auth/register/teacher/',
         data: {
           'username': _usernameController.text.trim(),
@@ -37,22 +40,44 @@ class _TeacherRegistrationScreenState extends ConsumerState<TeacherRegistrationS
           'last_name': _lastNameController.text.trim(),
           'employee_id': _employeeIdController.text.trim(),
           'department': _departmentController.text.trim(),
+          'qualification': _qualificationController.text.trim(),
           'phone': _phoneController.text.trim(),
         },
       );
 
+      final newTeacherId = (response.data['data']['id'] ?? 0) as int;
+      final teacherName =
+          '${_firstNameController.text.trim()} ${_lastNameController.text.trim()}'.trim();
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Teacher registered successfully!'), backgroundColor: Colors.green),
+          const SnackBar(
+            content: Text('Teacher registered! Capturing face photos now…'),
+            backgroundColor: Colors.green,
+          ),
         );
-        Navigator.pop(context);
+
+        // Auto face capture flow for teachers too.
+        context.pushReplacement(
+          '/face-registration',
+          extra: {'userId': newTeacherId, 'studentName': teacherName},
+        );
+      }
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      final message = (data is Map && data['message'] != null)
+          ? data['message'].toString()
+          : (e.message ?? 'Teacher registration failed');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
+        );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Teacher registered: $e'), backgroundColor: Colors.indigo),
+          SnackBar(content: Text('Teacher registration failed: $e'), backgroundColor: Colors.redAccent),
         );
-        Navigator.pop(context);
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -100,6 +125,11 @@ class _TeacherRegistrationScreenState extends ConsumerState<TeacherRegistrationS
                 controller: _departmentController,
                 decoration: const InputDecoration(labelText: 'Department (e.g. Computer Science)', prefixIcon: Icon(Icons.domain)),
                 validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _qualificationController,
+                decoration: const InputDecoration(labelText: 'Qualification (e.g. MSc)', prefixIcon: Icon(Icons.school)),
               ),
               const SizedBox(height: 16),
               TextFormField(

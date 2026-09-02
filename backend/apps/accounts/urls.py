@@ -13,8 +13,8 @@ from apps.accounts.views import (
 )
 
 router = DefaultRouter()
-router.register(r"students-list", StudentViewSet, basename="student-detail")
-router.register(r"teachers-list", TeacherViewSet, basename="teacher-detail")
+router.register(r"students", StudentViewSet, basename="student-detail")
+router.register(r"teachers", TeacherViewSet, basename="teacher-detail")
 
 urlpatterns = [
     path("login/", RoleTokenObtainPairView.as_view(), name="token_obtain_pair"),

@@ -18,6 +18,7 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
   final _fatherNameController = TextEditingController();
   final _motherNameController = TextEditingController();
   final _rollNumberController = TextEditingController();
+  final _admissionNumberController = TextEditingController();
   final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -26,14 +27,98 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
   final _guardianNameController = TextEditingController();
   final _guardianPhoneController = TextEditingController();
   String _selectedGender = 'male';
+
+  List<Map<String, dynamic>> _classes = [];
+  List<Map<String, dynamic>> _sections = [];
+  int? _selectedClassId;
+  int? _selectedSectionId;
+  bool _loadingOptions = true;
   bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadClasses();
+  }
+
+  Future<void> _loadClasses() async {
+    setState(() => _loadingOptions = true);
+    try {
+      final apiClient = await ApiClient.fromPrefs();
+      final resp = await apiClient.dio.get('academics/classes-list/');
+      final data = resp.data;
+      final raw = (data is Map ? data['data'] : data) ?? data;
+      final list = (raw is List) ? raw.cast<Map<String, dynamic>>() : <Map<String, dynamic>>[];
+      if (mounted) setState(() => _classes = list);
+    } catch (_) {
+      // Leave classes empty; dropdown will simply have no options.
+    } finally {
+      if (mounted) setState(() => _loadingOptions = false);
+    }
+  }
+
+  Future<void> _loadSections(int classId) async {
+    try {
+      final apiClient = await ApiClient.fromPrefs();
+      final resp = await apiClient.dio.get('academics/sections-list/');
+      final data = resp.data;
+      final raw = (data is Map ? data['data'] : data) ?? data;
+      final list = (raw is List) ? raw.cast<Map<String, dynamic>>() : <Map<String, dynamic>>[];
+      final filtered = list
+          .where((s) =>
+              s['class_obj'] == classId ||
+              s['class'] == classId ||
+              s['class_obj_id'] == classId)
+          .toList();
+      if (mounted) {
+        setState(() {
+          _sections = filtered;
+          _selectedSectionId = null;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _sections = [];
+          _selectedSectionId = null;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _firstNameController.dispose();
+    _lastNameController.dispose();
+    _fatherNameController.dispose();
+    _motherNameController.dispose();
+    _rollNumberController.dispose();
+    _admissionNumberController.dispose();
+    _usernameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _phoneController.dispose();
+    _addressController.dispose();
+    _guardianNameController.dispose();
+    _guardianPhoneController.dispose();
+    super.dispose();
+  }
 
   Future<void> _submitRegistration() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_selectedClassId == null || _selectedSectionId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select both Class and Section.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
     setState(() => _isLoading = true);
 
     try {
-      final apiClient = ApiClient();
+      final apiClient = await ApiClient.fromPrefs();
       final response = await apiClient.dio.post(
         'auth/register/student/',
         data: {
@@ -46,6 +131,9 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
           'mother_name': _motherNameController.text.trim(),
           'phone': _phoneController.text.trim(),
           'roll_number': _rollNumberController.text.trim(),
+          'admission_number': _admissionNumberController.text.trim(),
+          'class_id': _selectedClassId,
+          'section_id': _selectedSectionId,
           'gender': _selectedGender,
           'guardian_name': _guardianNameController.text.trim(),
           'guardian_phone': _guardianPhoneController.text.trim(),
@@ -141,6 +229,56 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
               Row(
                 children: [
                   Expanded(
+                    child: DropdownButtonFormField<int>(
+                      value: _selectedClassId,
+                      decoration: const InputDecoration(
+                        labelText: 'Class *',
+                        prefixIcon: Icon(Icons.school),
+                      ),
+                      hint: _loadingOptions
+                          ? const Text('Loading…')
+                          : const Text('Select class'),
+                      items: _classes
+                          .map((c) => DropdownMenuItem<int>(
+                                value: (c['id'] as num).toInt(),
+                                child: Text(c['name'].toString()),
+                              ))
+                          .toList(),
+                      onChanged: (v) {
+                        setState(() => _selectedClassId = v);
+                        if (v != null) _loadSections(v);
+                      },
+                      validator: (v) => v == null ? 'Select a class' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: DropdownButtonFormField<int>(
+                      value: _selectedSectionId,
+                      decoration: const InputDecoration(
+                        labelText: 'Section *',
+                        prefixIcon: Icon(Icons.group),
+                      ),
+                      hint: _selectedClassId == null
+                          ? const Text('Select class first')
+                          : const Text('Select section'),
+                      items: _sections
+                          .map((s) => DropdownMenuItem<int>(
+                                value: (s['id'] as num).toInt(),
+                                child: Text('Section ${s['name']}'),
+                              ))
+                          .toList(),
+                      onChanged: (v) => setState(() => _selectedSectionId = v),
+                      validator: (v) => v == null ? 'Select a section' : null,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              Row(
+                children: [
+                  Expanded(
                     child: TextFormField(
                       controller: _fatherNameController,
                       decoration: const InputDecoration(labelText: "Father's Name"),
@@ -157,10 +295,23 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
               ),
               const SizedBox(height: 16),
 
-              TextFormField(
-                controller: _rollNumberController,
-                decoration: const InputDecoration(labelText: 'Roll Number / Student ID *', prefixIcon: Icon(Icons.badge)),
-                validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _rollNumberController,
+                      decoration: const InputDecoration(labelText: 'Roll Number *', prefixIcon: Icon(Icons.badge)),
+                      validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _admissionNumberController,
+                      decoration: const InputDecoration(labelText: 'Admission No.', prefixIcon: Icon(Icons.confirmation_number)),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
 

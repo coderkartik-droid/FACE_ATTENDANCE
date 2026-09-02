@@ -65,7 +65,15 @@ class RegisterTeacherView(generics.CreateAPIView):
             {
                 "success": True,
                 "message": "Teacher registered successfully.",
-                "data": UserSerializer(user).data,
+                "data": {
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "full_name": user.full_name,
+                    "role": user.role,
+                },
             },
             status=status.HTTP_201_CREATED,
         )
@@ -83,7 +91,15 @@ class RegisterStudentView(generics.CreateAPIView):
             {
                 "success": True,
                 "message": "Student registered successfully.",
-                "data": UserSerializer(user).data,
+                "data": {
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "full_name": user.full_name,
+                    "role": user.role,
+                },
             },
             status=status.HTTP_201_CREATED,
         )
@@ -118,6 +134,14 @@ class StudentViewSet(StandardResponseMixin, viewsets.ModelViewSet):
     filterset_fields = ["class_obj", "section_obj", "gender"]
     search_fields = ["user__first_name", "user__last_name", "user__username", "roll_number"]
 
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            "success": True,
+            "data": serializer.data,
+        })
+
 
 class TeacherViewSet(StandardResponseMixin, viewsets.ModelViewSet):
     permission_classes = [IsAdmin]
@@ -125,3 +149,11 @@ class TeacherViewSet(StandardResponseMixin, viewsets.ModelViewSet):
     queryset = TeacherProfile.objects.select_related("user").order_by("employee_id")
     filterset_fields = ["department"]
     search_fields = ["user__first_name", "user__last_name", "user__username", "employee_id"]
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            "success": True,
+            "data": serializer.data,
+        })

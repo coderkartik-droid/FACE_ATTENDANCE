@@ -9,18 +9,28 @@ class StandardResponseMixin:
 
     message = "Success."
 
-    def _envelope(self, data, message=None, status_code=None):
-        return Response(
-            {
-                "success": status_code is None or status_code < 400,
-                "message": message or self.message,
-                "data": data,
-            },
-            status=status_code or status.HTTP_200_OK,
-        )
+    def _envelope(self, data, message=None, status_code=None, meta=None):
+        body = {
+            "success": status_code is None or status_code < 400,
+            "message": message or self.message,
+            "data": data,
+        }
+        if meta is not None:
+            body["meta"] = meta
+        return Response(body, status=status_code or status.HTTP_200_OK)
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
+        # DRF pagination replaces response.data with a dict containing
+        # "results". Unwrap it so clients always receive a plain list in
+        # "data", and expose pagination metadata under "meta".
+        if isinstance(response.data, dict) and "results" in response.data:
+            meta = {
+                k: response.data[k]
+                for k in ("count", "total_pages", "current_page", "next", "previous")
+                if k in response.data
+            }
+            return self._envelope(response.data["results"], meta=meta)
         return self._envelope(response.data)
 
     def retrieve(self, request, *args, **kwargs):

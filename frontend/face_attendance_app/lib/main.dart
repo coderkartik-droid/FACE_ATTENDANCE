@@ -1,11 +1,19 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'core/network/api_client.dart';
 import 'core/theme/app_theme.dart';
 import 'core/router/app_router.dart';
 import 'features/auth/providers/auth_provider.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Print the resolved API base URL so it's visible in the debug console.
+  final apiClient = await ApiClient.fromPrefs();
+  developer.log('Resolved API base URL: ${apiClient.baseUrl}', name: 'APP');
+
   runApp(
     const ProviderScope(
       child: FaceAttendanceApp(),

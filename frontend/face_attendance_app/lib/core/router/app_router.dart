@@ -10,6 +10,10 @@ import '../../features/face_registration/screens/face_registration_screen.dart';
 import '../../features/attendance/screens/live_attendance_screen.dart';
 import '../../features/reports/screens/reports_screen.dart';
 import '../../features/common/placeholder_screens.dart';
+import '../../features/management/screens/classes_screen.dart';
+import '../../features/management/screens/class_details_screen.dart';
+import '../../features/management/screens/teachers_screen.dart';
+import '../../features/management/screens/students_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authProvider);
@@ -58,6 +62,22 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/reports',
         builder: (context, state) => const ReportsScreen(),
+      ),
+      GoRoute(
+        path: '/classes',
+        builder: (context, state) => const ClassesScreen(),
+      ),
+      GoRoute(
+        path: '/class-details',
+        builder: (context, state) => const ClassDetailsScreen(),
+      ),
+      GoRoute(
+        path: '/teachers',
+        builder: (context, state) => const TeachersScreen(),
+      ),
+      GoRoute(
+        path: '/students',
+        builder: (context, state) => const StudentsScreen(),
       ),
       GoRoute(
         path: '/profile',
