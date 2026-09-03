@@ -4,6 +4,26 @@ from rest_framework import status
 from rest_framework.response import Response
 
 
+import logging
+
+from apps.faces.models import FaceEmbedding, FaceImage
+
+logger = logging.getLogger(__name__)
+
+
+def _purge_face_data(user):
+    """Delete all stored face data (embeddings, images and media files) for a
+    user so a deleted person can never be recognised again."""
+    embeddings = FaceEmbedding.objects.filter(user=user)
+    images = FaceImage.objects.filter(user=user)
+    for image in images:
+        if image.image:
+            image.image.delete(save=False)
+    embeddings.delete()
+    images.delete()
+    logger.info("Purged face data for deleted user %s.", user.username)
+
+
 class StandardResponseMixin:
     """Wraps list/retrieve/create/update payloads into a {success, message, data} envelope."""
 
@@ -50,6 +70,12 @@ class StandardResponseMixin:
     def partial_update(self, request, *args, **kwargs):
         response = super().partial_update(request, *args, **kwargs)
         return self._envelope(response.data, "Updated successfully.")
+
+    def perform_destroy(self, instance):
+        # Remove all face data before the profile (and its user, via CASCADE)
+        # is deleted so the person is never recognised by Live Attendance.
+        _purge_face_data(instance.user)
+        instance.delete()
 
     def destroy(self, request, *args, **kwargs):
         super().destroy(request, *args, **kwargs)

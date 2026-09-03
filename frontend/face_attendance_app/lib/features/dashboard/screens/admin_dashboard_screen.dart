@@ -1,14 +1,24 @@
 import 'dart:async';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/network/api_client.dart';
 import '../../auth/providers/auth_provider.dart';
 
+final dashboardDateFilterProvider = StateProvider<String>((ref) => 'Today');
+
 final dashboardSummaryProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   try {
+    ref.watch(managementRefreshProvider);
     final apiClient = await ApiClient.fromPrefs();
-    final response = await apiClient.dio.get('reports/dashboard/');
+    final filter = ref.watch(dashboardDateFilterProvider);
+    final dates = dashboardDateRange(filter);
+    final response = await apiClient.dio.get('reports/dashboard/', queryParameters: {
+      if (dates.length == 1) 'date': dates.first,
+      if (dates.length == 2) 'start_date': dates.first,
+      if (dates.length == 2) 'end_date': dates.last,
+    }, options: Options(extra: {'skipCache': true}));
     return response.data['data'] ?? {};
   } catch (e) {
     return {
@@ -56,6 +66,61 @@ class DashboardAutoRefresh extends StateNotifier<void> {
 final dashboardAutoRefreshProvider = StateNotifierProvider<DashboardAutoRefresh, void>((ref) {
   return DashboardAutoRefresh(ref);
 });
+
+List<String> dashboardDateRange(String filter) {
+  final today = DateTime.now();
+  String dateOnly(DateTime date) =>
+      '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  if (filter.startsWith('custom:')) return [filter.substring(7)];
+  if (filter == 'Yesterday') return [dateOnly(today.subtract(const Duration(days: 1)))];
+  if (filter == 'Last 7 Days') return [dateOnly(today.subtract(const Duration(days: 6))), dateOnly(today)];
+  if (filter == 'Last 30 Days') return [dateOnly(today.subtract(const Duration(days: 29))), dateOnly(today)];
+  return [dateOnly(today)];
+}
+
+String _attendanceLabel(String filter) => filter.startsWith('custom:') ? filter.substring(7) : filter;
+
+class _DashboardDateSelector extends StatelessWidget {
+  const _DashboardDateSelector({required this.selected, required this.onChanged});
+  final String selected;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = selected.startsWith('custom:') ? 'Custom date' : selected;
+    return Row(
+      children: [
+        const Text('Attendance date:'),
+        const SizedBox(width: 12),
+        DropdownButton<String>(
+          value: value,
+          items: const [
+            DropdownMenuItem(value: 'Today', child: Text('Today')),
+            DropdownMenuItem(value: 'Yesterday', child: Text('Yesterday')),
+            DropdownMenuItem(value: 'Last 7 Days', child: Text('Last 7 Days')),
+            DropdownMenuItem(value: 'Last 30 Days', child: Text('Last 30 Days')),
+            DropdownMenuItem(value: 'Custom date', child: Text('Custom date')),
+          ],
+          onChanged: (choice) async {
+            if (choice != 'Custom date') {
+              if (choice != null) onChanged(choice);
+              return;
+            }
+            final date = await showDatePicker(
+              context: context,
+              initialDate: DateTime.now(),
+              firstDate: DateTime(2000),
+              lastDate: DateTime.now(),
+            );
+            if (date != null) {
+              onChanged('custom:${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}');
+            }
+          },
+        ),
+      ],
+    );
+  }
+}
 
 class AdminDashboardScreen extends ConsumerWidget {
   const AdminDashboardScreen({super.key});
@@ -122,7 +187,7 @@ class AdminDashboardScreen extends ConsumerWidget {
                             style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                           ),
                           const SizedBox(height: 4),
-                          Text('Role: ${(userState.role ?? "admin").toUpperCase()} | AI Face Attendance ERP System'),
+                          Text('Role: ${_displayRole(userState.role)} | AI Face Attendance ERP System'),
                         ],
                       ),
                     ),
@@ -135,6 +200,11 @@ class AdminDashboardScreen extends ConsumerWidget {
             // Stat Cards Grid
 
 
+            _DashboardDateSelector(
+              selected: ref.watch(dashboardDateFilterProvider),
+              onChanged: (value) => ref.read(dashboardDateFilterProvider.notifier).state = value,
+            ),
+            const SizedBox(height: 16),
             Text('Live System Overview', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
 
@@ -154,9 +224,9 @@ class AdminDashboardScreen extends ConsumerWidget {
                       _StatCard(title: 'Total Students', value: '${data['total_students'] ?? 0}', icon: Icons.groups, color: Colors.blue),
                       _StatCard(title: 'Total Teachers', value: '${data['total_teachers'] ?? 0}', icon: Icons.school, color: Colors.purple),
                       _StatCard(title: 'Total Classes', value: '${data['total_classes'] ?? 0}', icon: Icons.class_, color: Colors.orange),
-                      _StatCard(title: "Today's Attendance", value: '${data['today_attendance'] ?? 0}', icon: Icons.event_available, color: Colors.green),
-                      _StatCard(title: 'Present Today', value: '${data['today_present'] ?? 0}', icon: Icons.how_to_reg, color: Colors.lightGreen),
-                      _StatCard(title: 'Absent Today', value: '${data['today_absent'] ?? 0}', icon: Icons.person_off, color: Colors.redAccent),
+                      _StatCard(title: '${_attendanceLabel(ref.watch(dashboardDateFilterProvider))} Attendance', value: '${data['today_attendance'] ?? 0}', icon: Icons.event_available, color: Colors.green),
+                      _StatCard(title: 'Present ${_attendanceLabel(ref.watch(dashboardDateFilterProvider))}', value: '${data['today_present'] ?? 0}', icon: Icons.how_to_reg, color: Colors.lightGreen),
+                      _StatCard(title: 'Absent ${_attendanceLabel(ref.watch(dashboardDateFilterProvider))}', value: '${data['today_absent'] ?? 0}', icon: Icons.person_off, color: Colors.redAccent),
                       _StatCard(title: 'Face Registered', value: '${data['face_registered'] ?? 0}', icon: Icons.face, color: Colors.teal),
                       _StatCard(title: 'Face Pending', value: '${data['face_pending'] ?? 0}', icon: Icons.pending_actions, color: Colors.deepOrange),
                     ],
@@ -167,6 +237,8 @@ class AdminDashboardScreen extends ConsumerWidget {
                   Text('Class-wise Overview', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
                   _buildClassWiseBreakdown(data, theme),
+                  const SizedBox(height: 28),
+                  _buildRecentAttendance(data, theme),
                 ],
               ),
             ),
@@ -237,6 +309,46 @@ class AdminDashboardScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+String _displayRole(String? role) {
+  switch (role?.toLowerCase()) {
+    case 'super_admin':
+    case 'school_admin':
+    case 'admin':
+      return 'Admin';
+    case 'teacher':
+      return 'Teacher';
+    case 'student':
+      return 'Student';
+    default:
+      return 'Admin';
+  }
+}
+
+Widget _buildRecentAttendance(Map<String, dynamic> data, ThemeData theme) {
+  final records = data['recent_activity'] as List<dynamic>? ?? const [];
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text('Recent Attendance', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+      const SizedBox(height: 12),
+      if (records.isEmpty)
+        const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('No attendance records yet.')))
+      else
+        Card(
+          child: Column(
+            children: [
+              for (final record in records)
+                ListTile(
+                  title: Text(record['student_name']?.toString() ?? 'Unknown'),
+                  subtitle: Text('${record['role']?.toString() ?? 'Student'}  •  ${record['class_name']?.toString() ?? 'N/A'}'),
+                ),
+            ],
+          ),
+        ),
+    ],
+  );
 }
 
 Widget _buildClassWiseBreakdown(Map<String, dynamic> data, ThemeData theme) {

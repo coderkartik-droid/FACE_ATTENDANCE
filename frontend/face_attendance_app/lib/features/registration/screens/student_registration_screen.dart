@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/network/api_client.dart';
+import '../../dashboard/screens/admin_dashboard_screen.dart';
 
 class StudentRegistrationScreen extends ConsumerStatefulWidget {
   const StudentRegistrationScreen({super.key});
@@ -64,12 +65,10 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
       final data = resp.data;
       final raw = (data is Map ? data['data'] : data) ?? data;
       final list = (raw is List) ? raw.cast<Map<String, dynamic>>() : <Map<String, dynamic>>[];
-      final filtered = list
-          .where((s) =>
-              s['class_obj'] == classId ||
-              s['class'] == classId ||
-              s['class_obj_id'] == classId)
-          .toList();
+      final filtered = list.where((s) {
+        final sectionClassId = s['class_obj'] ?? s['class'] ?? s['class_obj_id'];
+        return int.tryParse(sectionClassId.toString()) == classId;
+      }).toList();
       if (mounted) {
         setState(() {
           _sections = filtered;
@@ -106,15 +105,6 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
 
   Future<void> _submitRegistration() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_selectedClassId == null || _selectedSectionId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select both Class and Section.'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
     setState(() => _isLoading = true);
 
     try {
@@ -142,6 +132,7 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
       );
 
       final newStudentId = (response.data['data']['id'] ?? 0) as int;
+      ref.read(managementRefreshProvider.notifier).state++;
       final studentName =
           '${_firstNameController.text.trim()} ${_lastNameController.text.trim()}'.trim();
 
@@ -210,16 +201,14 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
                   Expanded(
                     child: TextFormField(
                       controller: _firstNameController,
-                      decoration: const InputDecoration(labelText: 'First Name *', prefixIcon: Icon(Icons.person)),
-                      validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+                      decoration: const InputDecoration(labelText: 'First Name', prefixIcon: Icon(Icons.person)),
                     ),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
                     child: TextFormField(
                       controller: _lastNameController,
-                      decoration: const InputDecoration(labelText: 'Last Name *'),
-                      validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+                      decoration: const InputDecoration(labelText: 'Last Name'),
                     ),
                   ),
                 ],
@@ -232,7 +221,7 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
                     child: DropdownButtonFormField<int>(
                       initialValue: _selectedClassId,
                       decoration: const InputDecoration(
-                        labelText: 'Class *',
+                        labelText: 'Class',
                         prefixIcon: Icon(Icons.school),
                       ),
                       hint: _loadingOptions
@@ -248,7 +237,6 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
                         setState(() => _selectedClassId = v);
                         if (v != null) _loadSections(v);
                       },
-                      validator: (v) => v == null ? 'Select a class' : null,
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -256,7 +244,7 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
                     child: DropdownButtonFormField<int>(
                       initialValue: _selectedSectionId,
                       decoration: const InputDecoration(
-                        labelText: 'Section *',
+                        labelText: 'Section',
                         prefixIcon: Icon(Icons.group),
                       ),
                       hint: _selectedClassId == null
@@ -269,7 +257,6 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
                               ))
                           .toList(),
                       onChanged: (v) => setState(() => _selectedSectionId = v),
-                      validator: (v) => v == null ? 'Select a section' : null,
                     ),
                   ),
                 ],
@@ -324,15 +311,15 @@ class _StudentRegistrationScreenState extends ConsumerState<StudentRegistrationS
 
               TextFormField(
                 controller: _emailController,
-                decoration: const InputDecoration(labelText: 'Email Address *', prefixIcon: Icon(Icons.email)),
-                validator: (v) => v == null || !v.contains('@') ? 'Valid email required' : null,
+                decoration: const InputDecoration(labelText: 'Email Address', prefixIcon: Icon(Icons.email)),
+                validator: (v) => v != null && v.isNotEmpty && !v.contains('@') ? 'Invalid email' : null,
               ),
               const SizedBox(height: 16),
 
               TextFormField(
                 controller: _passwordController,
                 obscureText: true,
-                decoration: const InputDecoration(labelText: 'Password *', prefixIcon: Icon(Icons.lock)),
+                decoration: const InputDecoration(labelText: 'Password', prefixIcon: Icon(Icons.lock)),
                 validator: (v) => v == null || v.length < 8 ? 'Minimum 8 chars' : null,
               ),
               const SizedBox(height: 16),

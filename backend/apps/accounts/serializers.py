@@ -28,10 +28,12 @@ class RoleTokenObtainPairSerializer(TokenObtainPairSerializer):
                 {"username": "Provide your username, roll number or employee ID."}
             )
 
-        # Resolve the identifier to a user allowing username / roll number /
-        # employee ID (the minimal-login requirement).
+        # Resolve the identifier to a user allowing username / email / roll
+        # number / employee ID (the minimal-login requirement).
         user = None
         db_user = User.objects.filter(username__iexact=identifier).first()
+        if db_user is None:
+            db_user = User.objects.filter(email__iexact=identifier).first()
         if db_user is None:
             db_user = (
                 StudentProfile.objects.filter(roll_number__iexact=identifier)
@@ -53,7 +55,8 @@ class RoleTokenObtainPairSerializer(TokenObtainPairSerializer):
             raise serializers.ValidationError("No active account with that identifier.")
 
         self.user = authenticate(
-            request=self.context.get("request"), username=db_user.username,
+            request=self.context.get("request"),
+            username=db_user.username,
             password=credentials.get("password"),
         )
         if self.user is None:
@@ -98,7 +101,9 @@ class TeacherProfileSerializer(serializers.ModelSerializer):
     last_name = serializers.CharField(write_only=True, required=False)
     phone = serializers.CharField(write_only=True, required=False, allow_blank=True)
     email = serializers.EmailField(write_only=True, required=False)
-    subject = serializers.CharField(source="qualification", required=False, allow_blank=True)
+    subject = serializers.CharField(
+        source="qualification", required=False, allow_blank=True
+    )
     face_registered = serializers.BooleanField(
         source="is_registration_complete", read_only=True
     )
@@ -139,9 +144,11 @@ class TeacherProfileSerializer(serializers.ModelSerializer):
 class TeacherRegisterSerializer(serializers.ModelSerializer):
     username = serializers.CharField(write_only=True)
     password = serializers.CharField(write_only=True, validators=[validate_password])
-    email = serializers.EmailField(write_only=True)
-    first_name = serializers.CharField(write_only=True)
-    last_name = serializers.CharField(write_only=True)
+    email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
+    first_name = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+    last_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
     phone = serializers.CharField(write_only=True, required=False, allow_blank=True)
     employee_id = serializers.CharField(write_only=True)
     department = serializers.CharField(write_only=True)
@@ -191,15 +198,17 @@ class TeacherRegisterSerializer(serializers.ModelSerializer):
 
         user = User.objects.create_user(
             username=validated_data["username"],
-            email=validated_data["email"],
+            email=validated_data.get("email", ""),
             password=validated_data["password"],
-            first_name=validated_data["first_name"],
-            last_name=validated_data["last_name"],
+            first_name=validated_data.get("first_name", ""),
+            last_name=validated_data.get("last_name", ""),
             phone=phone,
             role=User.Role.TEACHER,
         )
         TeacherProfile.objects.create(
-            user=user, employee_id=emp_id, department=dept,
+            user=user,
+            employee_id=emp_id,
+            department=dept,
             qualification=qualification,
         )
         return user
@@ -211,10 +220,16 @@ class StudentProfileSerializer(serializers.ModelSerializer):
     last_name = serializers.CharField(write_only=True, required=False)
     phone = serializers.CharField(write_only=True, required=False, allow_blank=True)
     class_id = serializers.PrimaryKeyRelatedField(
-        source="class_obj", queryset=Class.objects.all(), write_only=True, required=False,
+        source="class_obj",
+        queryset=Class.objects.all(),
+        write_only=True,
+        required=False,
     )
     section_id = serializers.PrimaryKeyRelatedField(
-        source="section_obj", queryset=Section.objects.all(), write_only=True, required=False,
+        source="section_obj",
+        queryset=Section.objects.all(),
+        write_only=True,
+        required=False,
     )
     class_name = serializers.CharField(source="class_obj.name", read_only=True)
     section_name = serializers.CharField(source="section_obj.name", read_only=True)
@@ -254,10 +269,18 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ("is_registration_complete",)
 
     def validate(self, attrs):
-        class_obj = attrs.get("class_obj", self.instance.class_obj if self.instance else None)
-        section_obj = attrs.get("section_obj", self.instance.section_obj if self.instance else None)
+        class_obj = attrs.get(
+            "class_obj", self.instance.class_obj if self.instance else None
+        )
+        section_obj = attrs.get(
+            "section_obj", self.instance.section_obj if self.instance else None
+        )
         if class_obj and section_obj and section_obj.class_obj_id != class_obj.id:
-            raise serializers.ValidationError({"section_id": "Selected section does not belong to the selected class."})
+            raise serializers.ValidationError(
+                {
+                    "section_id": "Selected section does not belong to the selected class."
+                }
+            )
         return attrs
 
     @transaction.atomic
@@ -277,9 +300,8 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         # Optional lightweight summary. Kept lazy to avoid heavy queries.
         try:
             from apps.attendance.models import AttendanceRecord
-            total = AttendanceRecord.objects.filter(
-                student=obj.user_id
-            ).count()
+
+            total = AttendanceRecord.objects.filter(student=obj.user_id).count()
             if total == 0:
                 return 0.0
             present = AttendanceRecord.objects.filter(
@@ -293,9 +315,11 @@ class StudentProfileSerializer(serializers.ModelSerializer):
 class StudentRegisterSerializer(serializers.ModelSerializer):
     username = serializers.CharField(write_only=True)
     password = serializers.CharField(write_only=True, validators=[validate_password])
-    email = serializers.EmailField(write_only=True)
-    first_name = serializers.CharField(write_only=True)
-    last_name = serializers.CharField(write_only=True)
+    email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
+    first_name = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+    last_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
     father_name = serializers.CharField(
         write_only=True, required=False, allow_blank=True
     )
@@ -307,8 +331,12 @@ class StudentRegisterSerializer(serializers.ModelSerializer):
     admission_number = serializers.CharField(
         write_only=True, required=False, allow_blank=True
     )
-    class_id = serializers.IntegerField(write_only=True)
-    section_id = serializers.IntegerField(write_only=True)
+    class_id = serializers.IntegerField(
+        write_only=True, required=False, allow_null=True
+    )
+    section_id = serializers.IntegerField(
+        write_only=True, required=False, allow_null=True
+    )
     date_of_birth = serializers.DateField(
         write_only=True, required=False, allow_null=True
     )
@@ -382,8 +410,18 @@ class StudentRegisterSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         class_id = attrs.get("class_id")
         section_id = attrs.get("section_id")
-        if class_id and section_id and not Section.objects.filter(id=section_id, class_obj_id=class_id).exists():
-            raise serializers.ValidationError({"section_id": "Selected section does not belong to the selected class."})
+        if (
+            class_id
+            and section_id
+            and not Section.objects.filter(
+                id=section_id, class_obj_id=class_id
+            ).exists()
+        ):
+            raise serializers.ValidationError(
+                {
+                    "section_id": "Selected section does not belong to the selected class."
+                }
+            )
         return attrs
 
     @transaction.atomic
@@ -403,10 +441,10 @@ class StudentRegisterSerializer(serializers.ModelSerializer):
 
         user = User.objects.create_user(
             username=validated_data["username"],
-            email=validated_data["email"],
+            email=validated_data.get("email", ""),
             password=validated_data["password"],
-            first_name=validated_data["first_name"],
-            last_name=validated_data["last_name"],
+            first_name=validated_data.get("first_name", ""),
+            last_name=validated_data.get("last_name", ""),
             phone=phone,
             role=User.Role.STUDENT,
         )

@@ -15,6 +15,7 @@ class ClassDetailsScreen extends ConsumerStatefulWidget {
 
 class _ClassDetailsScreenState extends ConsumerState<ClassDetailsScreen> {
   List<Map<String, dynamic>> _students = [];
+  Set<int> _todayAttendanceIds = {};
   bool _loading = true;
   String? _error;
   late final int _classId;
@@ -32,10 +33,30 @@ class _ClassDetailsScreenState extends ConsumerState<ClassDetailsScreen> {
     setState(() => _loading = true);
     try {
       final apiClient = await ApiClient.fromPrefs();
+      final selectedDate = ref.read(dashboardDateFilterProvider);
+      final dates = dashboardDateRange(selectedDate);
       final response = await apiClient.dio.get('auth/students/', queryParameters: {'class_id': _classId}, options: Options(extra: {'skipCache': true}));
       final data = response.data is Map ? response.data['data'] : response.data;
       if (data is List) {
-        setState(() => _students = List<Map<String, dynamic>>.from(data));
+        final attendanceResponse = await apiClient.dio.get('attendance/today/', queryParameters: {
+          'class_id': _classId,
+          'status': 'PRESENT',
+          if (dates.length == 1) 'date': dates.first,
+          if (dates.length == 2) 'start_date': dates.first,
+          if (dates.length == 2) 'end_date': dates.last,
+        }, options: Options(extra: {'skipCache': true}));
+        final attendanceData = attendanceResponse.data is Map ? attendanceResponse.data['data'] : attendanceResponse.data;
+        final attendanceIds = attendanceData is List
+            ? attendanceData
+                .whereType<Map>()
+                .map((record) => (record['student'] as num?)?.toInt())
+                .whereType<int>()
+                .toSet()
+            : <int>{};
+        setState(() {
+          _students = List<Map<String, dynamic>>.from(data);
+          _todayAttendanceIds = attendanceIds;
+        });
       }
     } catch (e) {
       setState(() => _error = e.toString());
@@ -113,6 +134,12 @@ class _ClassDetailsScreenState extends ConsumerState<ClassDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<String>(dashboardDateFilterProvider, (previous, next) {
+      if (previous != next) _loadStudents();
+    });
+    ref.listen<int>(managementRefreshProvider, (previous, next) {
+      if (previous != null && previous != next) _loadStudents();
+    });
     return Scaffold(
       appBar: AppBar(
         title: Text(_className),
@@ -138,6 +165,7 @@ class _ClassDetailsScreenState extends ConsumerState<ClassDetailsScreen> {
                         final user = student['user'] as Map<String, dynamic>? ?? {};
                         final photo = user['profile_picture']?.toString();
                         final hasFace = profile['is_registration_complete'] == true;
+                        final isPresentToday = _todayAttendanceIds.contains(user['id']);
                         
                         return Card(
                           margin: const EdgeInsets.only(bottom: 12),
@@ -176,11 +204,11 @@ class _ClassDetailsScreenState extends ConsumerState<ClassDetailsScreen> {
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                       decoration: BoxDecoration(
-                                        color: hasFace ? Colors.green : Colors.orange,
+                                        color: isPresentToday ? Colors.green : Colors.red,
                                         borderRadius: BorderRadius.circular(12),
                                       ),
                                       child: Text(
-                                        hasFace ? 'Face Registered' : 'Face Pending',
+                                        isPresentToday ? 'Present' : 'Absent',
                                         style: const TextStyle(color: Colors.white, fontSize: 12),
                                       ),
                                     ),

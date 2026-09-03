@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../dashboard/screens/admin_dashboard_screen.dart';
 
 /// Live attendance screen.
 ///
@@ -145,6 +146,8 @@ class _LiveAttendanceScreenState
             _statusText = 'Attendance marked';
             _result = Map<String, dynamic>.from(data);
           });
+          ref.invalidate(dashboardSummaryProvider);
+          ref.read(managementRefreshProvider.notifier).state++;
         }
       } else {
         // Not matched (unknown face) — show Unknown Person, keep scanning.
@@ -416,17 +419,17 @@ class _LiveResultPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (state == _ScanState.unknown) {
-      return _card(Colors.red.shade50, Colors.red, const [
-        Icon(Icons.person_off, color: Colors.red), SizedBox(width: 10),
+      return _card(Colors.black, Colors.white, const [
+        Icon(Icons.person_off, color: Colors.white), SizedBox(width: 10),
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Unknown Person', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-          Text('No matching face found.'),
+          Text('Unknown Person', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          Text('No matching face found.', style: TextStyle(color: Colors.white)),
         ]),
       ]);
     }
     if (state != _ScanState.matched || result == null) {
-      return _card(Theme.of(context).colorScheme.surfaceContainerHighest, Theme.of(context).colorScheme.primary, [
-        Icon(Icons.face_retouching_natural, color: Theme.of(context).colorScheme.primary), const SizedBox(width: 10), Expanded(child: Text(statusText)),
+      return _card(Colors.black, Colors.white, [
+        const Icon(Icons.face_retouching_natural, color: Colors.white), const SizedBox(width: 10), Expanded(child: Text(statusText, style: const TextStyle(color: Colors.white))),
       ]);
     }
     final isTeacher = result!['person_type'] == 'teacher';
@@ -435,14 +438,14 @@ class _LiveResultPanel extends StatelessWidget {
     final details = isTeacher
         ? ['Employee ID: ${result!['employee_id'] ?? '-'}', 'Subject: ${result!['subject'] ?? '-'}', 'Department: ${result!['department'] ?? '-'}']
         : ['Roll Number: ${result!['roll_number'] ?? '-'}', 'Class: ${result!['class_name'] ?? '-'} | Section: ${result!['section_name'] ?? '-'}', "Father's Name: ${result!['father_name'] ?? '-'}"];
-    return _card(Colors.green.shade50, Colors.green, [
-      CircleAvatar(radius: 26, backgroundImage: photo != null && photo.isNotEmpty ? NetworkImage(photo) : null, child: photo == null || photo.isEmpty ? const Icon(Icons.person) : null),
+    return _card(Colors.black, Colors.white, [
+      CircleAvatar(radius: 26, backgroundImage: photo != null && photo.isNotEmpty ? NetworkImage(photo) : null, child: photo == null || photo.isEmpty ? const Icon(Icons.person, color: Colors.white) : null),
       const SizedBox(width: 10),
       Expanded(child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(result!['full_name']?.toString() ?? result!['student_name']?.toString() ?? 'Recognised person', style: const TextStyle(fontWeight: FontWeight.bold)),
-        ...details.map((detail) => Text(detail, style: const TextStyle(fontSize: 12))),
-        Text('Status: Present • Confidence: ${confidence.toStringAsFixed(1)}%', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-        Text(DateTime.now().toLocal().toString().split('.').first, style: const TextStyle(fontSize: 11)),
+        Text(result!['full_name']?.toString() ?? result!['student_name']?.toString() ?? 'Recognised person', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        ...details.map((detail) => Text(detail, style: const TextStyle(fontSize: 12, color: Colors.white))),
+        Text('Status: Present • Confidence: ${confidence.toStringAsFixed(1)}%', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+        Text(DateTime.now().toLocal().toString().split('.').first, style: const TextStyle(fontSize: 11, color: Colors.white)),
       ]))),
     ]);
   }

@@ -11,7 +11,12 @@ class DashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
-        data = DashboardService.get_dashboard_summary(request.user)
+        data = DashboardService.get_dashboard_summary(
+            request.user,
+            selected_date=request.query_params.get("date"),
+            start_date=request.query_params.get("start_date"),
+            end_date=request.query_params.get("end_date"),
+        )
         return Response({"success": True, "data": data})
 
 
@@ -20,7 +25,11 @@ class ExcelExportView(APIView):
 
     def get(self, request, *args, **kwargs):
         queryset = AttendanceRecord.objects.select_related(
-            "student", "student__student_profile", "session", "session__class_obj", "session__section_obj"
+            "student",
+            "student__student_profile",
+            "session",
+            "session__class_obj",
+            "session__section_obj",
         ).order_by("-marked_at")
 
         # Filters
@@ -37,7 +46,9 @@ class ExcelExportView(APIView):
             excel_bytes,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        response["Content-Disposition"] = 'attachment; filename="attendance_report.xlsx"'
+        response["Content-Disposition"] = (
+            'attachment; filename="attendance_report.xlsx"'
+        )
         return response
 
 
@@ -46,7 +57,11 @@ class PDFExportView(APIView):
 
     def get(self, request, *args, **kwargs):
         queryset = AttendanceRecord.objects.select_related(
-            "student", "student__student_profile", "session", "session__class_obj", "session__section_obj"
+            "student",
+            "student__student_profile",
+            "session",
+            "session__class_obj",
+            "session__section_obj",
         ).order_by("-marked_at")
 
         # Filters

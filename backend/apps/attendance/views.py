@@ -26,9 +26,11 @@ User = get_user_model()
 class AttendanceSessionViewSet(StandardResponseMixin, viewsets.ModelViewSet):
     permission_classes = [IsAdminOrTeacher]
     serializer_class = AttendanceSessionSerializer
-    queryset = AttendanceSession.objects.select_related(
-        "class_obj", "section_obj", "teacher"
-    ).prefetch_related("records__student").all()
+    queryset = (
+        AttendanceSession.objects.select_related("class_obj", "section_obj", "teacher")
+        .prefetch_related("records__student")
+        .all()
+    )
     filterset_fields = ["class_obj", "section_obj", "teacher", "date", "is_active"]
     search_fields = ["session_name", "class_obj__name", "section_obj__name"]
 
@@ -50,12 +52,16 @@ class MarkAttendanceView(generics.CreateAPIView):
             try:
                 session = AttendanceSession.objects.get(id=session_id)
             except AttendanceSession.DoesNotExist:
-                logger.warning(f"Mark attendance failed: Session ID {session_id} not found.")
+                logger.warning(
+                    f"Mark attendance failed: Session ID {session_id} not found."
+                )
                 raise BusinessValidationError("Attendance session not found.")
 
         image_file = serializer.validated_data.get("image")
         student_id = serializer.validated_data.get("student_id")
-        status_choice = serializer.validated_data.get("status", AttendanceRecord.Status.PRESENT)
+        status_choice = serializer.validated_data.get(
+            "status", AttendanceRecord.Status.PRESENT
+        )
         remarks = serializer.validated_data.get("remarks", "")
 
         student = None
@@ -80,29 +86,68 @@ class MarkAttendanceView(generics.CreateAPIView):
             except User.DoesNotExist:
                 raise BusinessValidationError("Specified student not found.")
         else:
-            raise BusinessValidationError("Either camera image or student_id must be provided.")
+            raise BusinessValidationError(
+                "Either camera image or student_id must be provided."
+            )
 
-        # Teachers can be recognised on the same live camera.  They are not
-        # attached to a student class/session, so return the live recognition
-        # result without incorrectly creating a student attendance record.
+        if session is not None and session.date != timezone.localdate():
+            session = None
+
+        # Teachers use the same attendance record path as students. When the
+        # client does not provide a session, use the latest active session.
         if student.is_teacher():
             profile = student.teacher_profile
-            face_image = FaceImage.objects.filter(user=student).order_by("-created_at").first()
-            return Response({
-                "success": True,
-                "message": f"Teacher {student.full_name} recognised.",
-                "data": {
+            if session is None:
+                session = (
+                    AttendanceSession.objects.filter(
+                        date=timezone.localdate(), is_active=True
+                    )
+                    .order_by("-created_at")
+                    .first()
+                )
+            if session is None:
+                raise BusinessValidationError("No active attendance session available.")
+
+            record, _ = AttendanceRecord.objects.update_or_create(
+                session=session,
+                student=student,
+                defaults={
+                    "status": status_choice,
+                    "verification_method": method,
+                    "confidence_score": confidence,
+                    "remarks": remarks,
+                },
+            )
+            response_data = AttendanceRecordSerializer(record).data
+            face_image = (
+                FaceImage.objects.filter(user=student).order_by("-created_at").first()
+            )
+            response_data.update(
+                {
                     "person_type": "teacher",
                     "full_name": student.full_name,
                     "employee_id": profile.employee_id,
                     "subject": profile.qualification,
                     "department": profile.department,
-                    "photo": request.build_absolute_uri(face_image.image.url) if face_image else (request.build_absolute_uri(student.profile_picture.url) if student.profile_picture else None),
-                    "status": AttendanceRecord.Status.PRESENT,
-                    "confidence_score": confidence,
+                    "photo": (
+                        request.build_absolute_uri(face_image.image.url)
+                        if face_image
+                        else (
+                            request.build_absolute_uri(student.profile_picture.url)
+                            if student.profile_picture
+                            else None
+                        )
+                    ),
                     "recognized_at": timezone.now().isoformat(),
-                },
-            })
+                }
+            )
+            return Response(
+                {
+                    "success": True,
+                    "message": f"Teacher {student.full_name} recognised.",
+                    "data": response_data,
+                }
+            )
 
         # Auto-resolve the session when the client did not send one: use the
         # student's class/section and today's date. This removes the #1 cause
@@ -122,7 +167,11 @@ class MarkAttendanceView(generics.CreateAPIView):
                     defaults={"teacher": request.user, "is_active": True},
                 )
             else:
-                latest = AttendanceSession.objects.filter(is_active=True).order_by("-date", "-created_at").first()
+                latest = (
+                    AttendanceSession.objects.filter(is_active=True)
+                    .order_by("-date", "-created_at")
+                    .first()
+                )
                 if latest is None:
                     raise BusinessValidationError(
                         "No attendance session available and the student has no class/section assigned."
@@ -146,19 +195,48 @@ class MarkAttendanceView(generics.CreateAPIView):
 
         # Enhance response with user details
         response_data = AttendanceRecordSerializer(record).data
-        response_data.update({
-            "person_type": "student",
-            "full_name": student.full_name,
-            "student_name": student.full_name,
-            "student_id": student.id,
-            "confidence_score": confidence,
-            "roll_number": getattr(student.student_profile, 'roll_number', None) if hasattr(student, 'student_profile') else None,
-            "class_name": session.class_obj.name if session and session.class_obj else None,
-            "section_name": session.section_obj.name if session and session.section_obj else None,
-            "father_name": getattr(student.student_profile, "father_name", "") if hasattr(student, "student_profile") else "",
-            "photo": request.build_absolute_uri(FaceImage.objects.filter(user=student).order_by("-created_at").first().image.url) if FaceImage.objects.filter(user=student).exists() else (request.build_absolute_uri(student.profile_picture.url) if student.profile_picture else None),
-            "recognized_at": timezone.now().isoformat(),
-        })
+        response_data.update(
+            {
+                "person_type": "student",
+                "full_name": student.full_name,
+                "student_name": student.full_name,
+                "student_id": student.id,
+                "confidence_score": confidence,
+                "roll_number": (
+                    getattr(student.student_profile, "roll_number", None)
+                    if hasattr(student, "student_profile")
+                    else None
+                ),
+                "class_name": (
+                    session.class_obj.name if session and session.class_obj else None
+                ),
+                "section_name": (
+                    session.section_obj.name
+                    if session and session.section_obj
+                    else None
+                ),
+                "father_name": (
+                    getattr(student.student_profile, "father_name", "")
+                    if hasattr(student, "student_profile")
+                    else ""
+                ),
+                "photo": (
+                    request.build_absolute_uri(
+                        FaceImage.objects.filter(user=student)
+                        .order_by("-created_at")
+                        .first()
+                        .image.url
+                    )
+                    if FaceImage.objects.filter(user=student).exists()
+                    else (
+                        request.build_absolute_uri(student.profile_picture.url)
+                        if student.profile_picture
+                        else None
+                    )
+                ),
+                "recognized_at": timezone.now().isoformat(),
+            }
+        )
 
         return Response(
             {
@@ -207,7 +285,9 @@ class BulkMarkAttendanceView(generics.CreateAPIView):
             except User.DoesNotExist:
                 continue
 
-        logger.info(f"Bulk attendance updated for {len(updated_records)} students in Session {session.id}.")
+        logger.info(
+            f"Bulk attendance updated for {len(updated_records)} students in Session {session.id}."
+        )
 
         return Response(
             {
@@ -258,11 +338,39 @@ class TodayAttendanceView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
-        today = timezone.localdate()
+        date_param = request.query_params.get("date")
+        start_param = request.query_params.get("start_date")
+        end_param = request.query_params.get("end_date")
+        try:
+            selected_date = (
+                timezone.datetime.strptime(date_param, "%Y-%m-%d").date()
+                if date_param
+                else timezone.localdate()
+            )
+            start_date = (
+                timezone.datetime.strptime(start_param, "%Y-%m-%d").date()
+                if start_param
+                else selected_date
+            )
+            end_date = (
+                timezone.datetime.strptime(end_param, "%Y-%m-%d").date()
+                if end_param
+                else selected_date
+            )
+        except (TypeError, ValueError):
+            start_date = timezone.localdate()
+            end_date = start_date
         user = request.user
         queryset = AttendanceRecord.objects.select_related(
             "session", "student", "session__class_obj"
-        ).filter(session__date=today)
+        ).filter(session__date__range=(start_date, end_date))
+
+        class_id = request.query_params.get("class_id")
+        status_param = request.query_params.get("status")
+        if class_id:
+            queryset = queryset.filter(session__class_obj_id=class_id)
+        if status_param:
+            queryset = queryset.filter(status=status_param)
 
         if user.is_student():
             queryset = queryset.filter(student=user)
@@ -270,12 +378,14 @@ class TodayAttendanceView(APIView):
             queryset = queryset.filter(session__teacher=user)
 
         serializer = AttendanceRecordSerializer(queryset, many=True)
-        return Response({
-            "success": True,
-            "date": str(today),
-            "count": queryset.count(),
-            "data": serializer.data,
-        })
+        return Response(
+            {
+                "success": True,
+                "date": str(start_date),
+                "count": queryset.count(),
+                "data": serializer.data,
+            }
+        )
 
 
 class MonthlyAttendanceView(APIView):
@@ -287,9 +397,9 @@ class MonthlyAttendanceView(APIView):
         month = int(request.query_params.get("month", now.month))
 
         user = request.user
-        queryset = AttendanceRecord.objects.select_related(
-            "session", "student"
-        ).filter(session__date__year=year, session__date__month=month)
+        queryset = AttendanceRecord.objects.select_related("session", "student").filter(
+            session__date__year=year, session__date__month=month
+        )
 
         if user.is_student():
             queryset = queryset.filter(student=user)
@@ -302,19 +412,23 @@ class MonthlyAttendanceView(APIView):
         late = queryset.filter(status=AttendanceRecord.Status.LATE).count()
 
         serializer = AttendanceRecordSerializer(queryset[:100], many=True)
-        return Response({
-            "success": True,
-            "year": year,
-            "month": month,
-            "summary": {
-                "total": total,
-                "present": present,
-                "absent": absent,
-                "late": late,
-                "attendance_percentage": round((present / total * 100), 1) if total > 0 else 0.0,
-            },
-            "records": serializer.data,
-        })
+        return Response(
+            {
+                "success": True,
+                "year": year,
+                "month": month,
+                "summary": {
+                    "total": total,
+                    "present": present,
+                    "absent": absent,
+                    "late": late,
+                    "attendance_percentage": (
+                        round((present / total * 100), 1) if total > 0 else 0.0
+                    ),
+                },
+                "records": serializer.data,
+            }
+        )
 
 
 class StudentHistoryView(generics.ListAPIView):

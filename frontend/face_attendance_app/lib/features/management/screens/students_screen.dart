@@ -144,7 +144,10 @@ class _StudentsScreenState extends ConsumerState<StudentsScreen> {
           TextField(controller: father, decoration: const InputDecoration(labelText: "Father's Name")),
           TextField(controller: mother, decoration: const InputDecoration(labelText: "Mother's Name")),
           DropdownButtonFormField<int>(value: classId, decoration: const InputDecoration(labelText: 'Class'), items: classes.map((item) => DropdownMenuItem(value: (item['id'] as num).toInt(), child: Text(item['name'].toString()))).toList(), onChanged: (value) => setDialogState(() { classId = value; sectionId = null; })),
-          DropdownButtonFormField<int>(value: sectionId, decoration: const InputDecoration(labelText: 'Section'), items: sections.where((item) => classId == null || item['class_obj'] == classId).map((item) => DropdownMenuItem(value: (item['id'] as num).toInt(), child: Text(item['name'].toString()))).toList(), onChanged: (value) => setDialogState(() => sectionId = value)),
+          DropdownButtonFormField<int>(value: sectionId, decoration: const InputDecoration(labelText: 'Section'), items: sections.where((item) {
+            final sectionClassId = item['class_obj'] ?? item['class'] ?? item['class_obj_id'];
+            return classId == null || int.tryParse(sectionClassId.toString()) == classId;
+          }).map((item) => DropdownMenuItem(value: (item['id'] as num).toInt(), child: Text(item['name'].toString()))).toList(), onChanged: (value) => setDialogState(() => sectionId = value)),
           TextField(controller: phone, decoration: const InputDecoration(labelText: 'Phone')),
           TextField(controller: address, maxLines: 2, decoration: const InputDecoration(labelText: 'Address')),
         ]))),

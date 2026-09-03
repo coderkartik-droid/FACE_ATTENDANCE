@@ -1,5 +1,10 @@
+import 'dart:typed_data';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
+import '../../../core/network/api_client.dart';
 
 class ReportsScreen extends ConsumerStatefulWidget {
   const ReportsScreen({super.key});
@@ -12,19 +17,37 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   String _selectedFormat = 'Excel (.xlsx)';
   bool _isExporting = false;
 
-  void _exportReport() {
+  Future<void> _exportReport() async {
     setState(() => _isExporting = true);
-    Future.delayed(const Duration(seconds: 2), () {
+    try {
+      final apiClient = await ApiClient.fromPrefs();
+      final isExcel = _selectedFormat == 'Excel (.xlsx)';
+      final response = await apiClient.dio.get<List<int>>(
+        isExcel ? 'reports/export/excel/' : 'reports/export/pdf/',
+        options: Options(responseType: ResponseType.bytes, extra: {'skipCache': true}),
+      );
+      final fileName = isExcel ? 'attendance_report.xlsx' : 'attendance_report.pdf';
+      final mimeType = isExcel
+          ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          : 'application/pdf';
+      await const MethodChannel('face_attendance/downloads').invokeMethod<String>(
+        'saveFileToDownloads',
+        {'fileName': fileName, 'mimeType': mimeType, 'bytes': Uint8List.fromList(response.data ?? const <int>[])},
+      );
       if (mounted) {
-        setState(() => _isExporting = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Successfully exported attendance report as $_selectedFormat!'),
-            backgroundColor: Colors.green,
-          ),
+          SnackBar(content: Text('Downloaded $fileName to Downloads'), backgroundColor: Colors.green),
         );
       }
-    });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Download failed: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
   }
 
   @override

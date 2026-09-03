@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/network/api_client.dart';
+import '../../dashboard/screens/admin_dashboard_screen.dart';
 
 class TeacherRegistrationScreen extends ConsumerStatefulWidget {
   const TeacherRegistrationScreen({super.key});
@@ -46,6 +47,7 @@ class _TeacherRegistrationScreenState extends ConsumerState<TeacherRegistrationS
       );
 
       final newTeacherId = (response.data['data']['id'] ?? 0) as int;
+      ref.read(managementRefreshProvider.notifier).state++;
       final teacherName =
           '${_firstNameController.text.trim()} ${_lastNameController.text.trim()}'.trim();
 
@@ -107,7 +109,6 @@ class _TeacherRegistrationScreenState extends ConsumerState<TeacherRegistrationS
                     child: TextFormField(
                       controller: _firstNameController,
                       decoration: const InputDecoration(labelText: 'First Name'),
-                      validator: (v) => v == null || v.isEmpty ? 'Required' : null,
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -115,7 +116,6 @@ class _TeacherRegistrationScreenState extends ConsumerState<TeacherRegistrationS
                     child: TextFormField(
                       controller: _lastNameController,
                       decoration: const InputDecoration(labelText: 'Last Name'),
-                      validator: (v) => v == null || v.isEmpty ? 'Required' : null,
                     ),
                   ),
                 ],
@@ -141,7 +141,7 @@ class _TeacherRegistrationScreenState extends ConsumerState<TeacherRegistrationS
               TextFormField(
                 controller: _emailController,
                 decoration: const InputDecoration(labelText: 'Email Address', prefixIcon: Icon(Icons.email)),
-                validator: (v) => v == null || !v.contains('@') ? 'Invalid Email' : null,
+                validator: (v) => v != null && v.isNotEmpty && !v.contains('@') ? 'Invalid Email' : null,
               ),
               const SizedBox(height: 16),
               TextFormField(

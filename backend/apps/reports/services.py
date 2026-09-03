@@ -8,33 +8,63 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 from django.db.models import Count, Q
 from django.utils import timezone
-from django.contrib.auth import get_user_model
 
 from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.academics.models import Class, Section
-from apps.accounts.models import StudentProfile
-
-User = get_user_model()
+from apps.accounts.models import StudentProfile, TeacherProfile
 
 
 class DashboardService:
     @staticmethod
-    def get_dashboard_summary(user):
+    def get_dashboard_summary(user, selected_date=None, start_date=None, end_date=None):
         today = timezone.localdate()
+        try:
+            report_date = (
+                timezone.datetime.strptime(selected_date, "%Y-%m-%d").date()
+                if selected_date
+                else today
+            )
+            range_start = (
+                timezone.datetime.strptime(start_date, "%Y-%m-%d").date()
+                if start_date
+                else report_date
+            )
+            range_end = (
+                timezone.datetime.strptime(end_date, "%Y-%m-%d").date()
+                if end_date
+                else report_date
+            )
+        except (TypeError, ValueError):
+            range_start = today
+            range_end = today
 
-        total_students = User.objects.filter(role=User.Role.STUDENT, is_active=True).count()
-        total_teachers = User.objects.filter(role=User.Role.TEACHER, is_active=True).count()
+        total_students = StudentProfile.objects.filter(user__is_active=True).count()
+        total_teachers = TeacherProfile.objects.filter(user__is_active=True).count()
         total_classes = Class.objects.count()
 
-        face_registered = StudentProfile.objects.filter(is_registration_complete=True).count()
-        face_pending = StudentProfile.objects.filter(is_registration_complete=False).count()
+        face_registered = StudentProfile.objects.filter(
+            user__is_active=True, is_registration_complete=True
+        ).count()
+        face_pending = StudentProfile.objects.filter(
+            user__is_active=True, is_registration_complete=False
+        ).count()
 
-        today_sessions = AttendanceSession.objects.filter(date=today)
-        today_records = AttendanceRecord.objects.filter(session__date=today)
+        today_sessions = AttendanceSession.objects.filter(
+            date__range=(range_start, range_end)
+        )
+        today_records = AttendanceRecord.objects.filter(
+            session__date__range=(range_start, range_end),
+            student__is_active=True,
+        )
 
         total_marked_today = today_records.count()
-        present_today = today_records.filter(status=AttendanceRecord.Status.PRESENT).count()
-        absent_today = today_records.filter(status=AttendanceRecord.Status.ABSENT).count()
+        present_today = (
+            today_records.filter(status=AttendanceRecord.Status.PRESENT)
+            .values("student_id")
+            .distinct()
+            .count()
+        )
+        absent_today = max(total_students + total_teachers - present_today, 0)
         late_today = today_records.filter(status=AttendanceRecord.Status.LATE).count()
 
         attendance_rate = (
@@ -44,24 +74,31 @@ class DashboardService:
         )
 
         class_analytics = list(
-            Class.objects.annotate(student_count=Count("students")).values("id", "name", "student_count")
+            Class.objects.annotate(
+                student_count=Count(
+                    "students", filter=Q(students__user__is_active=True)
+                )
+            ).values("id", "name", "student_count")
         )
 
         # Class-wise attendance for today (single set of aggregate queries
         # instead of one query per class).
         class_attendance = []
         today_stats = (
-            AttendanceRecord.objects.filter(session__date=today)
+            AttendanceRecord.objects.filter(
+                session__date__range=(range_start, range_end),
+                student__is_active=True,
+            )
             .values("session__class_obj_id", "session__class_obj__name")
             .annotate(
                 marked=Count("id"),
                 present=Count("id", filter=Q(status=AttendanceRecord.Status.PRESENT)),
             )
         )
-        stats_by_class = {
-            row["session__class_obj_id"]: row for row in today_stats
-        }
-        for cls in Class.objects.annotate(student_count=Count("students")):
+        stats_by_class = {row["session__class_obj_id"]: row for row in today_stats}
+        for cls in Class.objects.annotate(
+            student_count=Count("students", filter=Q(students__user__is_active=True))
+        ):
             row = stats_by_class.get(cls.id)
             class_attendance.append(
                 {
@@ -74,13 +111,21 @@ class DashboardService:
             )
 
         section_analytics = list(
-            Section.objects.select_related("class_obj").annotate(student_count=Count("students")).values(
-                "id", "name", "class_obj__name", "student_count"
+            Section.objects.select_related("class_obj")
+            .annotate(
+                student_count=Count(
+                    "students", filter=Q(students__user__is_active=True)
+                )
             )
+            .values("id", "name", "class_obj__name", "student_count")
         )
 
         recent_records = (
-            AttendanceRecord.objects.select_related("student", "session", "session__class_obj")
+            AttendanceRecord.objects.filter(
+                session__date__range=(range_start, range_end),
+                student__is_active=True,
+            )
+            .select_related("student", "session", "session__class_obj")
             .order_by("-marked_at")[:10]
         )
 
@@ -88,7 +133,12 @@ class DashboardService:
             {
                 "id": r.id,
                 "student_name": r.student.full_name,
-                "class_name": r.session.class_obj.name if r.session and r.session.class_obj else "N/A",
+                "role": r.student.get_role_display(),
+                "class_name": (
+                    r.session.class_obj.name
+                    if r.session and r.session.class_obj
+                    else "N/A"
+                ),
                 "status": r.status,
                 "method": r.verification_method,
                 "marked_at": r.marked_at.strftime("%Y-%m-%d %H:%M:%S"),
@@ -124,21 +174,13 @@ class ReportExportService:
         ws.title = "Attendance Report"
 
         # Headers styling
-        header_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
+        header_fill = PatternFill(
+            start_color="1F2937", end_color="1F2937", fill_type="solid"
+        )
         header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
         align_center = Alignment(horizontal="center", vertical="center")
 
-        headers = [
-            "Date",
-            "Student Roll No",
-            "Student Name",
-            "Class",
-            "Section",
-            "Status",
-            "Verification Method",
-            "Confidence Score",
-            "Time Marked",
-        ]
+        headers = ["Name", "Role", "Class"]
         ws.append(headers)
 
         for col_num in range(1, len(headers) + 1):
@@ -148,22 +190,17 @@ class ReportExportService:
             cell.alignment = align_center
 
         for rec in queryset:
-            student_profile = getattr(rec.student, "student_profile", None)
-            roll = student_profile.roll_number if student_profile else ""
-            c_name = rec.session.class_obj.name if rec.session and rec.session.class_obj else ""
-            s_name = rec.session.section_obj.name if rec.session and rec.session.section_obj else ""
+            c_name = (
+                rec.session.class_obj.name
+                if rec.session and rec.session.class_obj
+                else ""
+            )
 
             ws.append(
                 [
-                    str(rec.session.date) if rec.session else "",
-                    roll,
                     rec.student.full_name,
+                    rec.student.get_role_display(),
                     c_name,
-                    s_name,
-                    rec.status,
-                    rec.verification_method,
-                    rec.confidence_score or "N/A",
-                    rec.marked_at.strftime("%H:%M:%S"),
                 ]
             )
 
@@ -175,7 +212,14 @@ class ReportExportService:
     @staticmethod
     def generate_pdf_report(queryset):
         buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=letter,
+            rightMargin=30,
+            leftMargin=30,
+            topMargin=30,
+            bottomMargin=30,
+        )
         elements = []
 
         styles = getSampleStyleSheet()
@@ -202,25 +246,24 @@ class ReportExportService:
             )
         )
 
-        table_data = [["Date", "Roll No", "Student Name", "Class", "Status", "Method"]]
+        table_data = [["Name", "Role", "Class"]]
 
         for rec in queryset[:500]:
-            student_profile = getattr(rec.student, "student_profile", None)
-            roll = student_profile.roll_number if student_profile else ""
-            c_name = rec.session.class_obj.name if rec.session and rec.session.class_obj else ""
+            c_name = (
+                rec.session.class_obj.name
+                if rec.session and rec.session.class_obj
+                else ""
+            )
 
             table_data.append(
                 [
-                    str(rec.session.date) if rec.session else "",
-                    roll,
-                    rec.student.full_name[:20],
+                    rec.student.full_name,
+                    rec.student.get_role_display(),
                     c_name,
-                    rec.status,
-                    rec.verification_method,
                 ]
             )
 
-        t = Table(table_data, colWidths=[70, 70, 150, 80, 70, 100])
+        t = Table(table_data, colWidths=[180, 100, 140])
         t.setStyle(
             TableStyle(
                 [
