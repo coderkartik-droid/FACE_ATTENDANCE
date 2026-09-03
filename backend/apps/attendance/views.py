@@ -17,6 +17,7 @@ from apps.attendance.serializers import (
     BulkMarkAttendanceSerializer,
 )
 from apps.faces.services import FaceRecognitionService
+from apps.faces.models import FaceImage
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -81,6 +82,28 @@ class MarkAttendanceView(generics.CreateAPIView):
         else:
             raise BusinessValidationError("Either camera image or student_id must be provided.")
 
+        # Teachers can be recognised on the same live camera.  They are not
+        # attached to a student class/session, so return the live recognition
+        # result without incorrectly creating a student attendance record.
+        if student.is_teacher():
+            profile = student.teacher_profile
+            face_image = FaceImage.objects.filter(user=student).order_by("-created_at").first()
+            return Response({
+                "success": True,
+                "message": f"Teacher {student.full_name} recognised.",
+                "data": {
+                    "person_type": "teacher",
+                    "full_name": student.full_name,
+                    "employee_id": profile.employee_id,
+                    "subject": profile.qualification,
+                    "department": profile.department,
+                    "photo": request.build_absolute_uri(face_image.image.url) if face_image else (request.build_absolute_uri(student.profile_picture.url) if student.profile_picture else None),
+                    "status": AttendanceRecord.Status.PRESENT,
+                    "confidence_score": confidence,
+                    "recognized_at": timezone.now().isoformat(),
+                },
+            })
+
         # Auto-resolve the session when the client did not send one: use the
         # student's class/section and today's date. This removes the #1 cause
         # of live attendance failing for properly-registered users (missing /
@@ -124,12 +147,17 @@ class MarkAttendanceView(generics.CreateAPIView):
         # Enhance response with user details
         response_data = AttendanceRecordSerializer(record).data
         response_data.update({
+            "person_type": "student",
+            "full_name": student.full_name,
             "student_name": student.full_name,
             "student_id": student.id,
             "confidence_score": confidence,
             "roll_number": getattr(student.student_profile, 'roll_number', None) if hasattr(student, 'student_profile') else None,
             "class_name": session.class_obj.name if session and session.class_obj else None,
             "section_name": session.section_obj.name if session and session.section_obj else None,
+            "father_name": getattr(student.student_profile, "father_name", "") if hasattr(student, "student_profile") else "",
+            "photo": request.build_absolute_uri(FaceImage.objects.filter(user=student).order_by("-created_at").first().image.url) if FaceImage.objects.filter(user=student).exists() else (request.build_absolute_uri(student.profile_picture.url) if student.profile_picture else None),
+            "recognized_at": timezone.now().isoformat(),
         })
 
         return Response(

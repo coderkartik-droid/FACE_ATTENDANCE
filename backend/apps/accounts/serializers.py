@@ -92,6 +92,13 @@ class UserSerializer(serializers.ModelSerializer):
 
 class TeacherProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
+    # These fields are deliberately kept flat so the management client can
+    # update a profile and its related user in a single existing PATCH call.
+    first_name = serializers.CharField(write_only=True, required=False)
+    last_name = serializers.CharField(write_only=True, required=False)
+    phone = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    email = serializers.EmailField(write_only=True, required=False)
+    subject = serializers.CharField(source="qualification", required=False, allow_blank=True)
     face_registered = serializers.BooleanField(
         source="is_registration_complete", read_only=True
     )
@@ -104,11 +111,29 @@ class TeacherProfileSerializer(serializers.ModelSerializer):
             "employee_id",
             "department",
             "qualification",
+            "subject",
+            "first_name",
+            "last_name",
+            "phone",
+            "email",
             "is_registration_complete",
             "face_registered",
             "created_at",
         )
         read_only_fields = ("is_registration_complete",)
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        user_data = {
+            field: validated_data.pop(field)
+            for field in ("first_name", "last_name", "phone", "email")
+            if field in validated_data
+        }
+        for field, value in user_data.items():
+            setattr(instance.user, field, value)
+        if user_data:
+            instance.user.save(update_fields=list(user_data))
+        return super().update(instance, validated_data)
 
 
 class TeacherRegisterSerializer(serializers.ModelSerializer):
@@ -182,6 +207,15 @@ class TeacherRegisterSerializer(serializers.ModelSerializer):
 
 class StudentProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
+    first_name = serializers.CharField(write_only=True, required=False)
+    last_name = serializers.CharField(write_only=True, required=False)
+    phone = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    class_id = serializers.PrimaryKeyRelatedField(
+        source="class_obj", queryset=Class.objects.all(), write_only=True, required=False,
+    )
+    section_id = serializers.PrimaryKeyRelatedField(
+        source="section_obj", queryset=Section.objects.all(), write_only=True, required=False,
+    )
     class_name = serializers.CharField(source="class_obj.name", read_only=True)
     section_name = serializers.CharField(source="section_obj.name", read_only=True)
     face_registered = serializers.BooleanField(
@@ -199,8 +233,10 @@ class StudentProfileSerializer(serializers.ModelSerializer):
             "father_name",
             "mother_name",
             "class_obj",
+            "class_id",
             "class_name",
             "section_obj",
+            "section_id",
             "section_name",
             "date_of_birth",
             "gender",
@@ -211,8 +247,31 @@ class StudentProfileSerializer(serializers.ModelSerializer):
             "face_registered",
             "attendance_percentage",
             "created_at",
+            "first_name",
+            "last_name",
+            "phone",
         )
         read_only_fields = ("is_registration_complete",)
+
+    def validate(self, attrs):
+        class_obj = attrs.get("class_obj", self.instance.class_obj if self.instance else None)
+        section_obj = attrs.get("section_obj", self.instance.section_obj if self.instance else None)
+        if class_obj and section_obj and section_obj.class_obj_id != class_obj.id:
+            raise serializers.ValidationError({"section_id": "Selected section does not belong to the selected class."})
+        return attrs
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        user_data = {
+            field: validated_data.pop(field)
+            for field in ("first_name", "last_name", "phone")
+            if field in validated_data
+        }
+        for field, value in user_data.items():
+            setattr(instance.user, field, value)
+        if user_data:
+            instance.user.save(update_fields=list(user_data))
+        return super().update(instance, validated_data)
 
     def get_attendance_percentage(self, obj):
         # Optional lightweight summary. Kept lazy to avoid heavy queries.
@@ -319,6 +378,13 @@ class StudentRegisterSerializer(serializers.ModelSerializer):
         if not Section.objects.filter(id=value).exists():
             raise serializers.ValidationError("Selected section does not exist.")
         return value
+
+    def validate(self, attrs):
+        class_id = attrs.get("class_id")
+        section_id = attrs.get("section_id")
+        if class_id and section_id and not Section.objects.filter(id=section_id, class_obj_id=class_id).exists():
+            raise serializers.ValidationError({"section_id": "Selected section does not belong to the selected class."})
+        return attrs
 
     @transaction.atomic
     def create(self, validated_data):

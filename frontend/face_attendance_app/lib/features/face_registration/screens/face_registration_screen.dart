@@ -149,27 +149,11 @@ class _FaceRegistrationScreenState extends ConsumerState<FaceRegistrationScreen>
 
       if (mounted) {
         setState(() => _completed = true);
-        await showDialog<void>(
-          context: context,
-          barrierDismissible: false,
-          builder: (ctx) => AlertDialog(
-            icon: const Icon(Icons.check_circle, color: Colors.green, size: 54),
-            title: const Text('Face Registration Completed Successfully'),
-            content: Text(
-              '$registered face image(s) captured and the face encoding was '
-              'generated for ${widget.studentName}.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  context.go('/dashboard');
-                },
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('$registered face images registered for ${widget.studentName}.'),
+          backgroundColor: Colors.green,
+        ));
+        context.go('/dashboard');
       }
     } on DioException catch (e) {
       final msg = e.response?.data is Map

@@ -1,8 +1,8 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import '../../../core/network/api_client.dart';
+import '../../dashboard/screens/admin_dashboard_screen.dart';
 
 class StudentsScreen extends ConsumerStatefulWidget {
   const StudentsScreen({super.key});
@@ -59,8 +59,8 @@ class _StudentsScreenState extends ConsumerState<StudentsScreen> {
         _filteredStudents = _students;
       } else {
         _filteredStudents = _students.where((student) {
-          final name = student['full_name']?.toString().toLowerCase() ?? '';
-          final roll = (student['student_profile']?['roll_number']?.toString() ?? '').toLowerCase();
+          final name = (student['user']?['full_name']?.toString() ?? '').toLowerCase();
+          final roll = (student['roll_number']?.toString() ?? '').toLowerCase();
           return name.contains(query) || roll.contains(query);
         }).toList();
       }
@@ -91,12 +91,14 @@ class _StudentsScreenState extends ConsumerState<StudentsScreen> {
     if (confirmed == true) {
       try {
         final apiClient = await ApiClient.fromPrefs();
-        await apiClient.dio.delete('accounts/students/$studentId/');
+        await apiClient.dio.delete('auth/students/$studentId/');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Student deleted successfully'), backgroundColor: Colors.green),
           );
           _loadStudents();
+          ref.invalidate(dashboardSummaryProvider);
+          ref.read(managementRefreshProvider.notifier).state++;
         }
       } catch (e) {
         if (mounted) {
@@ -106,6 +108,60 @@ class _StudentsScreenState extends ConsumerState<StudentsScreen> {
         }
       }
     }
+  }
+
+  Future<void> _editStudent(Map<String, dynamic> student) async {
+    final user = student['user'] as Map<String, dynamic>? ?? {};
+    final first = TextEditingController(text: user['first_name']?.toString() ?? '');
+    final last = TextEditingController(text: user['last_name']?.toString() ?? '');
+    final roll = TextEditingController(text: student['roll_number']?.toString() ?? '');
+    final admission = TextEditingController(text: student['admission_number']?.toString() ?? '');
+    final father = TextEditingController(text: student['father_name']?.toString() ?? '');
+    final mother = TextEditingController(text: student['mother_name']?.toString() ?? '');
+    final phone = TextEditingController(text: user['phone']?.toString() ?? '');
+    final address = TextEditingController(text: student['address']?.toString() ?? '');
+    final apiClient = await ApiClient.fromPrefs();
+    List<Map<String, dynamic>> classes = [];
+    List<Map<String, dynamic>> sections = [];
+    try {
+      final classResponse = await apiClient.dio.get('academics/classes-list/', options: Options(extra: {'skipCache': true}));
+      final classData = classResponse.data is Map ? classResponse.data['data'] : classResponse.data;
+      classes = classData is List ? List<Map<String, dynamic>>.from(classData) : [];
+      final sectionResponse = await apiClient.dio.get('academics/sections-list/', options: Options(extra: {'skipCache': true}));
+      final sectionData = sectionResponse.data is Map ? sectionResponse.data['data'] : sectionResponse.data;
+      sections = sectionData is List ? List<Map<String, dynamic>>.from(sectionData) : [];
+    } catch (_) {}
+    if (!mounted) return;
+    int? classId = (student['class_obj'] as num?)?.toInt();
+    int? sectionId = (student['section_obj'] as num?)?.toInt();
+    final saved = await showDialog<bool>(context: context, builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: const Text('Edit Student'),
+        content: SizedBox(width: 520, child: SingleChildScrollView(child: Column(children: [
+          Row(children: [Expanded(child: TextField(controller: first, decoration: const InputDecoration(labelText: 'First Name'))), const SizedBox(width: 12), Expanded(child: TextField(controller: last, decoration: const InputDecoration(labelText: 'Last Name')))]),
+          TextField(controller: roll, decoration: const InputDecoration(labelText: 'Roll Number')),
+          TextField(controller: admission, decoration: const InputDecoration(labelText: 'Admission Number')),
+          TextField(controller: father, decoration: const InputDecoration(labelText: "Father's Name")),
+          TextField(controller: mother, decoration: const InputDecoration(labelText: "Mother's Name")),
+          DropdownButtonFormField<int>(value: classId, decoration: const InputDecoration(labelText: 'Class'), items: classes.map((item) => DropdownMenuItem(value: (item['id'] as num).toInt(), child: Text(item['name'].toString()))).toList(), onChanged: (value) => setDialogState(() { classId = value; sectionId = null; })),
+          DropdownButtonFormField<int>(value: sectionId, decoration: const InputDecoration(labelText: 'Section'), items: sections.where((item) => classId == null || item['class_obj'] == classId).map((item) => DropdownMenuItem(value: (item['id'] as num).toInt(), child: Text(item['name'].toString()))).toList(), onChanged: (value) => setDialogState(() => sectionId = value)),
+          TextField(controller: phone, decoration: const InputDecoration(labelText: 'Phone')),
+          TextField(controller: address, maxLines: 2, decoration: const InputDecoration(labelText: 'Address')),
+        ]))),
+        actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Save'))],
+      ),
+    ));
+    if (saved != true) return;
+    try {
+      await apiClient.dio.patch('auth/students/${student['id']}/', data: {'first_name': first.text.trim(), 'last_name': last.text.trim(), 'roll_number': roll.text.trim(), 'admission_number': admission.text.trim(), 'father_name': father.text.trim(), 'mother_name': mother.text.trim(), 'class_id': classId, 'section_id': sectionId, 'phone': phone.text.trim(), 'address': address.text.trim()});
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Student updated successfully'), backgroundColor: Colors.green));
+      await _loadStudents();
+      ref.invalidate(dashboardSummaryProvider);
+      ref.read(managementRefreshProvider.notifier).state++;
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update student: $e'), backgroundColor: Colors.red));
+    } finally { first.dispose(); last.dispose(); roll.dispose(); admission.dispose(); father.dispose(); mother.dispose(); phone.dispose(); address.dispose(); }
   }
 
   List<Map<String, dynamic>> get _paginatedStudents {
@@ -118,6 +174,9 @@ class _StudentsScreenState extends ConsumerState<StudentsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<int>(managementRefreshProvider, (previous, next) {
+      if (previous != null) _loadStudents();
+    });
     return Scaffold(
       appBar: AppBar(
         title: const Text('Students'),
@@ -164,7 +223,9 @@ class _StudentsScreenState extends ConsumerState<StudentsScreen> {
                                   itemCount: _paginatedStudents.length,
                                   itemBuilder: (context, index) {
                                     final student = _paginatedStudents[index];
-                                    final profile = student['student_profile'] as Map<String, dynamic>? ?? {};
+                                    final profile = student;
+                                    final user = student['user'] as Map<String, dynamic>? ?? {};
+                                    final photo = user['profile_picture']?.toString();
                                     final hasFace = profile['is_registration_complete'] == true;
                                     
                                     return Card(
@@ -172,12 +233,13 @@ class _StudentsScreenState extends ConsumerState<StudentsScreen> {
                                       child: ListTile(
                                         leading: CircleAvatar(
                                           backgroundColor: hasFace ? Colors.green : Colors.grey,
+                                          backgroundImage: photo != null && photo.isNotEmpty ? NetworkImage(photo) : null,
                                           child: Icon(
                                             hasFace ? Icons.face : Icons.person,
                                             color: Colors.white,
                                           ),
                                         ),
-                                        title: Text(student['full_name']?.toString() ?? 'Unknown'),
+                                        title: Text(user['full_name']?.toString() ?? 'Unknown'),
                                         subtitle: Text('Roll: ${profile['roll_number']?.toString() ?? 'N/A'}'),
                                         trailing: Row(
                                           mainAxisSize: MainAxisSize.min,
@@ -195,19 +257,14 @@ class _StudentsScreenState extends ConsumerState<StudentsScreen> {
                                             ),
                                             IconButton(
                                               icon: const Icon(Icons.edit),
-                                              onPressed: () {
-                                                // TODO: Implement edit functionality
-                                                ScaffoldMessenger.of(context).showSnackBar(
-                                                  const SnackBar(content: Text('Edit functionality coming soon')),
-                                                );
-                                              },
+                                              onPressed: () => _editStudent(student),
                                             ),
                                             IconButton(
                                               icon: const Icon(Icons.delete),
                                               color: Colors.red,
                                               onPressed: () => _deleteStudent(
                                                 student['id'] as int,
-                                                student['full_name']?.toString() ?? 'Student',
+                                                user['full_name']?.toString() ?? 'Student',
                                               ),
                                             ),
                                           ],

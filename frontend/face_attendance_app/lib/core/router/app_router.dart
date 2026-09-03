@@ -69,7 +69,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/class-details',
-        builder: (context, state) => const ClassDetailsScreen(),
+        builder: (context, state) {
+          final extra = state.extra as Map?;
+          final classId = (extra?['classId'] as num?)?.toInt();
+          final className = extra?['className']?.toString();
+          if (classId == null || className == null) {
+            return const ShellDashboardScreen(title: 'Class was not selected');
+          }
+          return ClassDetailsScreen(classId: classId, className: className);
+        },
       ),
       GoRoute(
         path: '/teachers',

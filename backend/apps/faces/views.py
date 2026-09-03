@@ -3,6 +3,7 @@ from rest_framework import generics, status, viewsets
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
+from django.db import transaction
 
 from core.mixins import StandardResponseMixin
 from core.permissions import IsAdminOrTeacher, IsSchoolAdmin
@@ -43,35 +44,38 @@ class RegisterFaceView(generics.CreateAPIView):
                 "Face enrollment can only be performed for a student or teacher."
             )
 
-        if replace_existing:
-            deactivated_count = FaceEmbedding.objects.filter(
-                user=target_user, is_active=True
-            ).update(is_active=False)
-            logger.info(f"Deactivated {deactivated_count} older face embeddings for user {target_user.username}.")
+        # A failed sample must never leave a user with a half-enrolled face.
+        # JSONField cannot serialize numpy.ndarray, hence ``tolist`` below.
+        with transaction.atomic():
+            if replace_existing:
+                deactivated_count = FaceEmbedding.objects.filter(
+                    user=target_user, is_active=True
+                ).update(is_active=False)
+                logger.info("Deactivated %s older embeddings for %s.", deactivated_count, target_user.username)
 
-        images = serializer.validated_data["images"]
-        created_embeddings = []
+            images = serializer.validated_data["images"]
+            created_embeddings = []
+            for img in images:
+                face_results = FaceRecognitionService.extract_face_embeddings(img)
+                if not face_results:
+                    raise FaceNotDetectedError()
+                best_face = max(face_results, key=lambda x: x["score"])
+                # The extractor reads the stream; rewind it before ImageField saves it.
+                img.seek(0)
+                FaceImage.objects.create(user=target_user, image=img)
+                created_embeddings.append(FaceEmbedding.objects.create(
+                    user=target_user,
+                    embedding=best_face["embedding"].tolist(),
+                    quality_score=best_face["score"],
+                    is_active=True,
+                ))
 
-        for img in images:
-            face_results = FaceRecognitionService.extract_face_embeddings(img)
-            best_face = max(face_results, key=lambda x: x["score"])
-
-            FaceImage.objects.create(user=target_user, image=img)
-
-            embedding_record = FaceEmbedding.objects.create(
-                user=target_user,
-                embedding=best_face["embedding"],
-                quality_score=best_face["score"],
-                is_active=True,
-            )
-            created_embeddings.append(embedding_record)
-
-        if hasattr(target_user, "student_profile"):
-            target_user.student_profile.is_registration_complete = True
-            target_user.student_profile.save()
-        elif hasattr(target_user, "teacher_profile"):
-            target_user.teacher_profile.is_registration_complete = True
-            target_user.teacher_profile.save()
+            if hasattr(target_user, "student_profile"):
+                target_user.student_profile.is_registration_complete = True
+                target_user.student_profile.save(update_fields=["is_registration_complete"])
+            elif hasattr(target_user, "teacher_profile"):
+                target_user.teacher_profile.is_registration_complete = True
+                target_user.teacher_profile.save(update_fields=["is_registration_complete"])
 
         logger.info(
             f"Successfully registered {len(created_embeddings)} face embeddings for user {target_user.username} (ID: {target_user.id}). Registration Complete."

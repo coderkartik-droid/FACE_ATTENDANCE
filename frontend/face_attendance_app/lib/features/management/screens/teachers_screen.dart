@@ -1,8 +1,8 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import '../../../core/network/api_client.dart';
+import '../../dashboard/screens/admin_dashboard_screen.dart';
 
 class TeachersScreen extends ConsumerStatefulWidget {
   const TeachersScreen({super.key});
@@ -26,7 +26,7 @@ class _TeachersScreenState extends ConsumerState<TeachersScreen> {
     setState(() => _loading = true);
     try {
       final apiClient = await ApiClient.fromPrefs();
-      final response = await apiClient.dio.get('accounts/teachers/');
+      final response = await apiClient.dio.get('auth/teachers/', options: Options(extra: {'skipCache': true}));
       final data = response.data is Map ? response.data['data'] : response.data;
       if (data is List) {
         setState(() => _teachers = List<Map<String, dynamic>>.from(data));
@@ -61,12 +61,14 @@ class _TeachersScreenState extends ConsumerState<TeachersScreen> {
     if (confirmed == true) {
       try {
         final apiClient = await ApiClient.fromPrefs();
-        await apiClient.dio.delete('accounts/teachers/$teacherId/');
+        await apiClient.dio.delete('auth/teachers/$teacherId/');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Teacher deleted successfully'), backgroundColor: Colors.green),
           );
           _loadTeachers();
+          ref.invalidate(dashboardSummaryProvider);
+          ref.read(managementRefreshProvider.notifier).state++;
         }
       } catch (e) {
         if (mounted) {
@@ -78,8 +80,43 @@ class _TeachersScreenState extends ConsumerState<TeachersScreen> {
     }
   }
 
+  Future<void> _editTeacher(Map<String, dynamic> teacher) async {
+    final user = teacher['user'] as Map<String, dynamic>? ?? {};
+    final first = TextEditingController(text: user['first_name']?.toString() ?? '');
+    final last = TextEditingController(text: user['last_name']?.toString() ?? '');
+    final employee = TextEditingController(text: teacher['employee_id']?.toString() ?? '');
+    final subject = TextEditingController(text: teacher['qualification']?.toString() ?? '');
+    final department = TextEditingController(text: teacher['department']?.toString() ?? '');
+    final phone = TextEditingController(text: user['phone']?.toString() ?? '');
+    final email = TextEditingController(text: user['email']?.toString() ?? '');
+    if (!mounted) return;
+    final saved = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(title: const Text('Edit Teacher'), content: SizedBox(width: 500, child: SingleChildScrollView(child: Column(children: [
+      Row(children: [Expanded(child: TextField(controller: first, decoration: const InputDecoration(labelText: 'First Name'))), const SizedBox(width: 12), Expanded(child: TextField(controller: last, decoration: const InputDecoration(labelText: 'Last Name')))]),
+      TextField(controller: employee, decoration: const InputDecoration(labelText: 'Employee ID')),
+      TextField(controller: subject, decoration: const InputDecoration(labelText: 'Subject')),
+      TextField(controller: department, decoration: const InputDecoration(labelText: 'Department')),
+      TextField(controller: phone, decoration: const InputDecoration(labelText: 'Phone')),
+      TextField(controller: email, decoration: const InputDecoration(labelText: 'Email')),
+    ]))), actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Save'))]));
+    if (saved != true) return;
+    try {
+      final apiClient = await ApiClient.fromPrefs();
+      await apiClient.dio.patch('auth/teachers/${teacher['id']}/', data: {'first_name': first.text.trim(), 'last_name': last.text.trim(), 'employee_id': employee.text.trim(), 'subject': subject.text.trim(), 'department': department.text.trim(), 'phone': phone.text.trim(), 'email': email.text.trim()});
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Teacher updated successfully'), backgroundColor: Colors.green));
+      await _loadTeachers();
+      ref.invalidate(dashboardSummaryProvider);
+      ref.read(managementRefreshProvider.notifier).state++;
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update teacher: $e'), backgroundColor: Colors.red));
+    } finally { first.dispose(); last.dispose(); employee.dispose(); subject.dispose(); department.dispose(); phone.dispose(); email.dispose(); }
+  }
+
   @override
   Widget build(BuildContext context) {
+    ref.listen<int>(managementRefreshProvider, (previous, next) {
+      if (previous != null) _loadTeachers();
+    });
     return Scaffold(
       appBar: AppBar(
         title: const Text('Teachers'),
@@ -101,7 +138,9 @@ class _TeachersScreenState extends ConsumerState<TeachersScreen> {
                       itemCount: _teachers.length,
                       itemBuilder: (context, index) {
                         final teacher = _teachers[index];
-                        final profile = teacher['teacher_profile'] as Map<String, dynamic>? ?? {};
+                        final profile = teacher;
+                        final user = teacher['user'] as Map<String, dynamic>? ?? {};
+                        final photo = user['profile_picture']?.toString();
                         final hasFace = profile['is_registration_complete'] == true;
                         
                         return Card(
@@ -116,6 +155,7 @@ class _TeachersScreenState extends ConsumerState<TeachersScreen> {
                                     CircleAvatar(
                                       radius: 30,
                                       backgroundColor: hasFace ? Colors.green : Colors.grey,
+                                      backgroundImage: photo != null && photo.isNotEmpty ? NetworkImage(photo) : null,
                                       child: Icon(
                                         hasFace ? Icons.face : Icons.person,
                                         color: Colors.white,
@@ -128,7 +168,7 @@ class _TeachersScreenState extends ConsumerState<TeachersScreen> {
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            teacher['full_name']?.toString() ?? 'Unknown',
+                                            user['full_name']?.toString() ?? 'Unknown',
                                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                                           ),
                                           Text('Employee ID: ${profile['employee_id']?.toString() ?? 'N/A'}'),
@@ -154,12 +194,7 @@ class _TeachersScreenState extends ConsumerState<TeachersScreen> {
                                   mainAxisAlignment: MainAxisAlignment.end,
                                   children: [
                                     TextButton.icon(
-                                      onPressed: () {
-                                        // TODO: Implement edit functionality
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('Edit functionality coming soon')),
-                                        );
-                                      },
+                                      onPressed: () => _editTeacher(teacher),
                                       icon: const Icon(Icons.edit),
                                       label: const Text('Edit'),
                                     ),
@@ -167,7 +202,7 @@ class _TeachersScreenState extends ConsumerState<TeachersScreen> {
                                     TextButton.icon(
                                       onPressed: () => _deleteTeacher(
                                         teacher['id'] as int,
-                                        teacher['full_name']?.toString() ?? 'Teacher',
+                                        user['full_name']?.toString() ?? 'Teacher',
                                       ),
                                       icon: const Icon(Icons.delete),
                                       label: const Text('Delete'),

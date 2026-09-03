@@ -26,6 +26,10 @@ final dashboardSummaryProvider = FutureProvider.autoDispose<Map<String, dynamic>
   }
 });
 
+/// A shared invalidation signal for management mutations.  Screens keep their
+/// local lists, while the dashboard statistics are refreshed immediately.
+final managementRefreshProvider = StateProvider<int>((ref) => 0);
+
 // Auto-refresh controller for dashboard
 class DashboardAutoRefresh extends StateNotifier<void> {
   DashboardAutoRefresh(this.ref) : super(null) {

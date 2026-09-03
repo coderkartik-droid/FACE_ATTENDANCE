@@ -5,7 +5,6 @@ import 'package:camera/camera.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../../core/network/api_client.dart';
@@ -31,12 +30,12 @@ class _LiveAttendanceScreenState
     extends ConsumerState<LiveAttendanceScreen> {
   CameraController? _controller;
   bool _cameraReady = false;
-  bool _inDialog = false;
   bool _uploading = false;
   Timer? _scanTimer;
   _ScanState _scanState = _ScanState.idle;
   String? _error;
   String _statusText = 'Look into the camera — attendance is automatic';
+  Map<String, dynamic>? _result;
 
   @override
   void initState() {
@@ -86,7 +85,7 @@ class _LiveAttendanceScreenState
   void _startScanLoop() {
     _scanTimer?.cancel();
     _scanTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
-      if (!mounted || _inDialog || _uploading || _scanState == _ScanState.scanning) {
+      if (!mounted || _uploading || _scanState == _ScanState.scanning) {
         return;
       }
       await _captureAndRecognise();
@@ -98,7 +97,12 @@ class _LiveAttendanceScreenState
     if (controller == null || !controller.value.isInitialized || _uploading) {
       return;
     }
-    if (mounted) setState(() => _scanState = _ScanState.scanning);
+    if (mounted) {
+      setState(() {
+        _uploading = true;
+        _scanState = _ScanState.scanning;
+      });
+    }
 
     XFile? frame;
     try {
@@ -135,28 +139,12 @@ class _LiveAttendanceScreenState
 
       if (success) {
         final data = (body['data'] ?? {}) as Map;
-        final student = (data['student'] ?? {}) as Map;
         if (mounted) {
           setState(() {
             _scanState = _ScanState.matched;
             _statusText = 'Attendance marked';
+            _result = Map<String, dynamic>.from(data);
           });
-          _inDialog = true;
-          await _showMatchedDialog(
-            name: (data['student_name'] ?? student['full_name'] ?? 'User') as String,
-            rollNumber: (data['roll_number'] ?? student['roll_number'] ?? '') as String,
-            className: (data['class_name'] ?? student['class_name'] ?? '') as String,
-            section: (data['section_name'] ?? student['section_name'] ?? '') as String,
-            confidence: data['confidence_score']?.toString() ?? '',
-            time: TimeOfDay.now().format(context),
-          );
-          _inDialog = false;
-          if (mounted) {
-            setState(() {
-              _scanState = _ScanState.idle;
-              _statusText = 'Look into the camera — attendance is automatic';
-            });
-          }
         }
       } else {
         // Not matched (unknown face) — show Unknown Person, keep scanning.
@@ -164,17 +152,9 @@ class _LiveAttendanceScreenState
         if (mounted) {
           setState(() {
             _scanState = _ScanState.unknown;
-            _statusText = 'Unknown person — keep looking at the camera';
+            _statusText = 'Unknown person';
+            _result = null;
           });
-          _inDialog = true;
-          await _showUnknownDialog(message.toString());
-          _inDialog = false;
-          if (mounted) {
-            setState(() {
-              _scanState = _ScanState.idle;
-              _statusText = 'Look into the camera — attendance is automatic';
-            });
-          }
         }
       }
     } on DioException catch (e) {
@@ -191,8 +171,9 @@ class _LiveAttendanceScreenState
     } finally {
       // Remove temp frame to avoid storage growth.
       try {
-        await File(frame!.path).delete();
+        await File(frame.path).delete();
       } catch (_) {}
+      if (mounted) setState(() => _uploading = false);
     }
   }
 
@@ -333,8 +314,6 @@ class _LiveAttendanceScreenState
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
       appBar: AppBar(title: const Text('Live Face Recognition Attendance')),
       body: SafeArea(
@@ -410,44 +389,14 @@ class _LiveAttendanceScreenState
               ),
             ),
 
-            // Status strip (~20% bottom).
+            // Result panel stays visible below the camera; no recognition dialog
+            // takes the user away from the live preview.
             Expanded(
               flex: 2,
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 300),
-                        child: Icon(
-                          switch (_scanState) {
-                            _ScanState.matched => Icons.check_circle,
-                            _ScanState.unknown => Icons.help_outline,
-                            _ => Icons.face_retouching_natural,
-                          },
-                          key: ValueKey(_scanState),
-                          size: 26,
-                          color: switch (_scanState) {
-                            _ScanState.matched => Colors.green,
-                            _ScanState.unknown => Colors.red,
-                            _ => theme.primaryColor,
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Flexible(
-                        child: Text(
-                          _statusText,
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+                child: _LiveResultPanel(
+                  state: _scanState, result: _result, statusText: _statusText,
                 ),
               ),
             ),
@@ -456,6 +405,53 @@ class _LiveAttendanceScreenState
       ),
     );
   }
+}
+
+class _LiveResultPanel extends StatelessWidget {
+  const _LiveResultPanel({required this.state, required this.result, required this.statusText});
+  final _ScanState state;
+  final Map<String, dynamic>? result;
+  final String statusText;
+
+  @override
+  Widget build(BuildContext context) {
+    if (state == _ScanState.unknown) {
+      return _card(Colors.red.shade50, Colors.red, const [
+        Icon(Icons.person_off, color: Colors.red), SizedBox(width: 10),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Unknown Person', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          Text('No matching face found.'),
+        ]),
+      ]);
+    }
+    if (state != _ScanState.matched || result == null) {
+      return _card(Theme.of(context).colorScheme.surfaceContainerHighest, Theme.of(context).colorScheme.primary, [
+        Icon(Icons.face_retouching_natural, color: Theme.of(context).colorScheme.primary), const SizedBox(width: 10), Expanded(child: Text(statusText)),
+      ]);
+    }
+    final isTeacher = result!['person_type'] == 'teacher';
+    final photo = result!['photo']?.toString();
+    final confidence = ((result!['confidence_score'] as num?)?.toDouble() ?? 0) * 100;
+    final details = isTeacher
+        ? ['Employee ID: ${result!['employee_id'] ?? '-'}', 'Subject: ${result!['subject'] ?? '-'}', 'Department: ${result!['department'] ?? '-'}']
+        : ['Roll Number: ${result!['roll_number'] ?? '-'}', 'Class: ${result!['class_name'] ?? '-'} | Section: ${result!['section_name'] ?? '-'}', "Father's Name: ${result!['father_name'] ?? '-'}"];
+    return _card(Colors.green.shade50, Colors.green, [
+      CircleAvatar(radius: 26, backgroundImage: photo != null && photo.isNotEmpty ? NetworkImage(photo) : null, child: photo == null || photo.isEmpty ? const Icon(Icons.person) : null),
+      const SizedBox(width: 10),
+      Expanded(child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(result!['full_name']?.toString() ?? result!['student_name']?.toString() ?? 'Recognised person', style: const TextStyle(fontWeight: FontWeight.bold)),
+        ...details.map((detail) => Text(detail, style: const TextStyle(fontSize: 12))),
+        Text('Status: Present • Confidence: ${confidence.toStringAsFixed(1)}%', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+        Text(DateTime.now().toLocal().toString().split('.').first, style: const TextStyle(fontSize: 11)),
+      ]))),
+    ]);
+  }
+
+  Widget _card(Color background, Color border, List<Widget> children) => Card(
+    margin: EdgeInsets.zero, color: background,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: border)),
+    child: Padding(padding: const EdgeInsets.all(10), child: Row(children: children)),
+  );
 }
 
 class _LiveOvalGuidePainter extends CustomPainter {

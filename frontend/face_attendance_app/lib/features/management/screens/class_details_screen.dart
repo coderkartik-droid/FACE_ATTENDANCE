@@ -1,11 +1,13 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import '../../../core/network/api_client.dart';
+import '../../dashboard/screens/admin_dashboard_screen.dart';
 
 class ClassDetailsScreen extends ConsumerStatefulWidget {
-  const ClassDetailsScreen({super.key});
+  const ClassDetailsScreen({super.key, required this.classId, required this.className});
+  final int classId;
+  final String className;
 
   @override
   ConsumerState<ClassDetailsScreen> createState() => _ClassDetailsScreenState();
@@ -15,26 +17,22 @@ class _ClassDetailsScreenState extends ConsumerState<ClassDetailsScreen> {
   List<Map<String, dynamic>> _students = [];
   bool _loading = true;
   String? _error;
-  int? _classId;
-  String? _className;
+  late final int _classId;
+  late final String _className;
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final args = ModalRoute.of(context)?.settings.arguments as Map?;
-    if (args != null && _classId == null) {
-      _classId = args['classId'] as int?;
-      _className = args['className'] as String?;
-      _loadStudents();
-    }
+  void initState() {
+    super.initState();
+    _classId = widget.classId;
+    _className = widget.className;
+    _loadStudents();
   }
 
   Future<void> _loadStudents() async {
-    if (_classId == null) return;
     setState(() => _loading = true);
     try {
       final apiClient = await ApiClient.fromPrefs();
-      final response = await apiClient.dio.get('accounts/students/', queryParameters: {'class_id': _classId});
+      final response = await apiClient.dio.get('auth/students/', queryParameters: {'class_id': _classId}, options: Options(extra: {'skipCache': true}));
       final data = response.data is Map ? response.data['data'] : response.data;
       if (data is List) {
         setState(() => _students = List<Map<String, dynamic>>.from(data));
@@ -69,12 +67,14 @@ class _ClassDetailsScreenState extends ConsumerState<ClassDetailsScreen> {
     if (confirmed == true) {
       try {
         final apiClient = await ApiClient.fromPrefs();
-        await apiClient.dio.delete('accounts/students/$studentId/');
+        await apiClient.dio.delete('auth/students/$studentId/');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Student deleted successfully'), backgroundColor: Colors.green),
           );
           _loadStudents();
+          ref.invalidate(dashboardSummaryProvider);
+          ref.read(managementRefreshProvider.notifier).state++;
         }
       } catch (e) {
         if (mounted) {
@@ -86,11 +86,36 @@ class _ClassDetailsScreenState extends ConsumerState<ClassDetailsScreen> {
     }
   }
 
+  Future<void> _editStudent(Map<String, dynamic> student) async {
+    final user = student['user'] as Map<String, dynamic>? ?? {};
+    final first = TextEditingController(text: user['first_name']?.toString() ?? '');
+    final last = TextEditingController(text: user['last_name']?.toString() ?? '');
+    final roll = TextEditingController(text: student['roll_number']?.toString() ?? '');
+    final father = TextEditingController(text: student['father_name']?.toString() ?? '');
+    final mother = TextEditingController(text: student['mother_name']?.toString() ?? '');
+    final phone = TextEditingController(text: user['phone']?.toString() ?? '');
+    final address = TextEditingController(text: student['address']?.toString() ?? '');
+    final saved = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(title: const Text('Edit Student'), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      TextField(controller: first, decoration: const InputDecoration(labelText: 'First Name')), TextField(controller: last, decoration: const InputDecoration(labelText: 'Last Name')), TextField(controller: roll, decoration: const InputDecoration(labelText: 'Roll Number')), TextField(controller: father, decoration: const InputDecoration(labelText: "Father's Name")), TextField(controller: mother, decoration: const InputDecoration(labelText: "Mother's Name")), TextField(controller: phone, decoration: const InputDecoration(labelText: 'Phone')), TextField(controller: address, decoration: const InputDecoration(labelText: 'Address')),
+    ])), actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Save'))]));
+    if (saved != true) return;
+    try {
+      final apiClient = await ApiClient.fromPrefs();
+      await apiClient.dio.patch('auth/students/${student['id']}/', data: {'first_name': first.text.trim(), 'last_name': last.text.trim(), 'roll_number': roll.text.trim(), 'father_name': father.text.trim(), 'mother_name': mother.text.trim(), 'phone': phone.text.trim(), 'address': address.text.trim()});
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Student updated successfully'), backgroundColor: Colors.green));
+      await _loadStudents();
+      ref.invalidate(dashboardSummaryProvider);
+      ref.read(managementRefreshProvider.notifier).state++;
+    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update student: $e'), backgroundColor: Colors.red)); }
+    finally { first.dispose(); last.dispose(); roll.dispose(); father.dispose(); mother.dispose(); phone.dispose(); address.dispose(); }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_className ?? 'Class Details'),
+        title: Text(_className),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -109,7 +134,9 @@ class _ClassDetailsScreenState extends ConsumerState<ClassDetailsScreen> {
                       itemCount: _students.length,
                       itemBuilder: (context, index) {
                         final student = _students[index];
-                        final profile = student['student_profile'] as Map<String, dynamic>? ?? {};
+                        final profile = student;
+                        final user = student['user'] as Map<String, dynamic>? ?? {};
+                        final photo = user['profile_picture']?.toString();
                         final hasFace = profile['is_registration_complete'] == true;
                         
                         return Card(
@@ -124,6 +151,7 @@ class _ClassDetailsScreenState extends ConsumerState<ClassDetailsScreen> {
                                     CircleAvatar(
                                       radius: 30,
                                       backgroundColor: hasFace ? Colors.green : Colors.grey,
+                                      backgroundImage: photo != null && photo.isNotEmpty ? NetworkImage(photo) : null,
                                       child: Icon(
                                         hasFace ? Icons.face : Icons.person,
                                         color: Colors.white,
@@ -136,12 +164,12 @@ class _ClassDetailsScreenState extends ConsumerState<ClassDetailsScreen> {
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            student['full_name']?.toString() ?? 'Unknown',
+                                            user['full_name']?.toString() ?? 'Unknown',
                                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                                           ),
                                           Text('Roll: ${profile['roll_number']?.toString() ?? 'N/A'}'),
                                           Text('Father: ${profile['father_name']?.toString() ?? 'N/A'}'),
-                                          Text('Section: ${profile['section_obj']?['name']?.toString() ?? 'N/A'}'),
+                                          Text('Section: ${profile['section_name']?.toString() ?? 'N/A'}'),
                                         ],
                                       ),
                                     ),
@@ -163,12 +191,7 @@ class _ClassDetailsScreenState extends ConsumerState<ClassDetailsScreen> {
                                   mainAxisAlignment: MainAxisAlignment.end,
                                   children: [
                                     TextButton.icon(
-                                      onPressed: () {
-                                        // TODO: Implement edit functionality
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('Edit functionality coming soon')),
-                                        );
-                                      },
+                                      onPressed: () => _editStudent(student),
                                       icon: const Icon(Icons.edit),
                                       label: const Text('Edit'),
                                     ),
@@ -176,7 +199,7 @@ class _ClassDetailsScreenState extends ConsumerState<ClassDetailsScreen> {
                                     TextButton.icon(
                                       onPressed: () => _deleteStudent(
                                         student['id'] as int,
-                                        student['full_name']?.toString() ?? 'Student',
+                                        user['full_name']?.toString() ?? 'Student',
                                       ),
                                       icon: const Icon(Icons.delete),
                                       label: const Text('Delete'),

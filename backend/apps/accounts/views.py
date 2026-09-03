@@ -120,27 +120,39 @@ class ChangePasswordView(generics.UpdateAPIView):
             )
         user.set_password(serializer.validated_data["new_password"])
         user.save()
-        return Response(
-            {"success": True, "message": "Password changed successfully."}
-        )
+        return Response({"success": True, "message": "Password changed successfully."})
 
 
 class StudentViewSet(StandardResponseMixin, viewsets.ModelViewSet):
     permission_classes = [IsAdminOrTeacher]
     serializer_class = StudentProfileSerializer
-    queryset = StudentProfile.objects.select_related("user", "class_obj", "section_obj").order_by(
-        "roll_number"
-    )
+    queryset = StudentProfile.objects.select_related(
+        "user", "class_obj", "section_obj"
+    ).order_by("roll_number")
     filterset_fields = ["class_obj", "section_obj", "gender"]
-    search_fields = ["user__first_name", "user__last_name", "user__username", "roll_number"]
+    search_fields = [
+        "user__first_name",
+        "user__last_name",
+        "user__username",
+        "roll_number",
+    ]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        # Accept the client-facing class_id while preserving django-filter's
+        # native class_obj query parameter.
+        class_id = self.request.query_params.get("class_id")
+        return queryset.filter(class_obj_id=class_id) if class_id else queryset
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
         serializer = self.get_serializer(queryset, many=True)
-        return Response({
-            "success": True,
-            "data": serializer.data,
-        })
+        return Response(
+            {
+                "success": True,
+                "data": serializer.data,
+            }
+        )
 
 
 class TeacherViewSet(StandardResponseMixin, viewsets.ModelViewSet):
@@ -148,12 +160,19 @@ class TeacherViewSet(StandardResponseMixin, viewsets.ModelViewSet):
     serializer_class = TeacherProfileSerializer
     queryset = TeacherProfile.objects.select_related("user").order_by("employee_id")
     filterset_fields = ["department"]
-    search_fields = ["user__first_name", "user__last_name", "user__username", "employee_id"]
+    search_fields = [
+        "user__first_name",
+        "user__last_name",
+        "user__username",
+        "employee_id",
+    ]
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
         serializer = self.get_serializer(queryset, many=True)
-        return Response({
-            "success": True,
-            "data": serializer.data,
-        })
+        return Response(
+            {
+                "success": True,
+                "data": serializer.data,
+            }
+        )

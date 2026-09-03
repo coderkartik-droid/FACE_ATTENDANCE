@@ -1,8 +1,8 @@
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/network/api_client.dart';
+import '../../dashboard/screens/admin_dashboard_screen.dart';
 
 class ClassesScreen extends ConsumerStatefulWidget {
   const ClassesScreen({super.key});
@@ -40,6 +40,11 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // A student move/delete changes class membership. Refresh the open class
+    // list as soon as any management screen completes such a mutation.
+    ref.listen<int>(managementRefreshProvider, (previous, next) {
+      if (previous != null) _loadClasses();
+    });
     return Scaffold(
       appBar: AppBar(
         title: const Text('Classes'),
